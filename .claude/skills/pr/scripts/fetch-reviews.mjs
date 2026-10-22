@@ -12,10 +12,11 @@ const PREVIEW_LENGTH = 300;
 const MAX_OUTPUT_BYTES = 10_485_760;
 const TMP_DIR = path.join('.skills-tmp', 'pr');
 const CODERABBIT_SUMMARY = 'auto-generated comment: summarize by coderabbit.ai';
-const THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes {
-    id isResolved comments(first: 100) { nodes { author { login } path line originalLine bodyText } }
-  } } } }
+const THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $endCursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id isResolved comments(first: 100) { nodes { author { login } path line originalLine bodyText } } }
+  } } }
 }`;
 
 const [owner, repo, number] = process.argv.slice(2);
@@ -25,7 +26,8 @@ function run(command, args) {
   return execFileSync(command, args, { encoding: 'utf8', maxBuffer: MAX_OUTPUT_BYTES });
 }
 
-const ghJson = (args) => JSON.parse(run('gh', args));
+/** Every page, not only the first: resolved threads count too, so on a long PR the newest feedback sits past entry 100. */
+const ghPages = (args) => JSON.parse(run('gh', ['api', '--paginate', '--slurp', ...args]));
 
 function lastPushDate() {
   const branch = run('git', ['branch', '--show-current']).trim();
@@ -53,7 +55,7 @@ function printEntry({ title, file, body, fields }) {
 
 function printThreads() {
   const query = ['-f', `query=${THREADS_QUERY}`, '-f', `owner=${owner}`, '-f', `repo=${repo}`, '-F', `number=${number}`];
-  const threads = ghJson(['api', 'graphql', ...query]).data.repository.pullRequest.reviewThreads.nodes;
+  const threads = ghPages(['graphql', ...query]).flatMap((page) => page.data.repository.pullRequest.reviewThreads.nodes);
   const open = threads.filter((thread) => !thread.isResolved);
   print('=== Source A: Inline threads ===');
   print(`Total: ${threads.length}, Unresolved: ${open.length}`);
@@ -66,7 +68,7 @@ function printThreads() {
 }
 
 function printReviews(since) {
-  const reviews = ghJson(['api', `repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`]);
+  const reviews = ghPages([`repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`]).flat();
   const fresh = reviews.filter((review) => review.body?.trim() && new Date(review.submitted_at) >= since);
   print('\n=== Source B: Review bodies ===');
   print(`Total reviews: ${reviews.length}, Shown: ${fresh.length}`);
@@ -77,7 +79,7 @@ function printReviews(since) {
 }
 
 function printComments(since) {
-  const comments = ghJson(['api', `repos/${owner}/${repo}/issues/${number}/comments?per_page=100`]);
+  const comments = ghPages([`repos/${owner}/${repo}/issues/${number}/comments?per_page=100`]).flat();
   const fresh = comments.filter((comment) => !comment.body.includes(CODERABBIT_SUMMARY) && new Date(comment.created_at) >= since);
   print('\n=== Source C: General comments ===');
   print(`Total: ${comments.length}, Shown: ${fresh.length}`);
