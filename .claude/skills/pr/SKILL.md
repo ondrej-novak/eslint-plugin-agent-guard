@@ -41,7 +41,7 @@ Create or update a pull request for the current branch. Uses the `gh` CLI; run t
      ```bash
      node .claude/skills/pr/scripts/fetch-reviews.mjs OWNER REPO PR_NUMBER
      ```
-     The script prints three sections (Source A: Inline threads, Source B: Review bodies, Source C: General comments). Every entry's full body is written to `.skills-tmp/pr/` — **read the `thread-*.txt`, `review-*.txt` or `gc-*.txt` file** when the preview is cut. **CRITICAL: Read ALL entries — do not stop at the first few.**
+     The script prints three sections (Source A: Inline threads, Source B: Review bodies, Source C: General comments). Every entry's full body (for a thread, the whole conversation with authors) is written to `.skills-tmp/pr/` — **read the `thread-*.txt`, `review-*.txt` or `gc-*.txt` file** when the preview is cut. **CRITICAL: Read ALL entries — do not stop at the first few.**
    - **Clean up** after processing: delete `.skills-tmp/pr/`.
 
    **Source types** (for understanding the output and for the resolve step):
