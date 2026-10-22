@@ -4,3 +4,4 @@ coverage/
 *.log
 test/fixtures/project/src/*
 !test/fixtures/project/src/.gitkeep
+.skills-tmp/

@@ -1,0 +1,58 @@
+# When to Mock
+
+Mock at **system boundaries** only:
+
+- External APIs
+- Time/randomness
+- File system (sometimes; a fixture directory is usually better, see `test/fixtures/project`)
+- The process environment
+
+Don't mock:
+
+- Your own modules
+- Internal collaborators
+- Anything you control, including ESLint and Stylelint. Run the real linter on a fixture.
+
+## Designing for Mockability
+
+At system boundaries, design interfaces that are easy to mock:
+
+**1. Use dependency injection**
+
+Pass external dependencies in rather than creating them internally:
+
+```javascript
+// Easy to mock
+function processPayment({ order, paymentClient }) {
+  return paymentClient.charge(order.total);
+}
+
+// Hard to mock
+function processPayment(order) {
+  const client = new StripeClient(process.env.STRIPE_KEY);
+  return client.charge(order.total);
+}
+```
+
+**2. Prefer SDK-style interfaces over generic fetchers**
+
+Create specific functions for each external operation instead of one generic function with conditional logic:
+
+```javascript
+// GOOD: Each function is independently mockable
+const api = {
+  getUser: (id) => fetch(`/users/${id}`),
+  getOrders: (userId) => fetch(`/users/${userId}/orders`),
+  createOrder: (data) => fetch('/orders', { method: 'POST', body: data }),
+};
+
+// BAD: Mocking requires conditional logic inside the mock
+const api = {
+  fetch: (endpoint, options) => fetch(endpoint, options),
+};
+```
+
+The SDK approach means:
+- Each mock returns one specific shape
+- No conditional logic in test setup
+- Easier to see which endpoints a test exercises
