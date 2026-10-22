@@ -1,4 +1,5 @@
 import { Linter } from 'eslint';
+import { builtinRules } from 'eslint/use-at-your-own-risk';
 import { describe, expect, it } from 'vitest';
 import plugin, { withHint } from '../src/index.js';
 import { ruleTester } from './rule-tester.js';
@@ -52,6 +53,37 @@ ruleTester.run('no-magic-numbers with hint', rules['no-magic-numbers'], {
       errors: [{ message: 'No magic number: 5.' }],
     },
   ],
+});
+
+ruleTester.run('no-restricted-imports with hint', withHint(builtinRules.get('no-restricted-imports')), {
+  valid: [],
+  invalid: [
+    {
+      code: "import _ from 'lodash';",
+      options: [{ paths: ['lodash'], hint: 'Use the native method.' }],
+      errors: [{ message: "'lodash' import is restricted from being used. Use the native method." }],
+    },
+    {
+      code: "import _ from 'lodash';",
+      options: [{ name: 'lodash', message: 'It is not tree-shaken.', hint: 'Use the native method.' }, 'moment'],
+      errors: [{ message: "'lodash' import is restricted from being used. It is not tree-shaken. Use the native method." }],
+    },
+  ],
+});
+
+describe('withHint on a rule whose schema is a JSON Schema object', () => {
+  const lintWith = (rule, options) =>
+    new Linter().verify('a();', [{ plugins: { local: { rules: { rule } } }, rules: { 'local/rule': ['error', ...options] } }]);
+
+  it('still rejects a hint outside the first option', () => {
+    const rule = withHint(builtinRules.get('no-restricted-imports'));
+    expect(() => lintWith(rule, ['moment', { name: 'lodash', hint: 'Use the native method.' }])).toThrow(/Unexpected property "hint"/);
+  });
+
+  it('keeps validation off for a rule that opts out with schema: false', () => {
+    const rule = withHint({ meta: { schema: false }, create: () => ({}) });
+    expect(() => lintWith(rule, [{ anything: 1, hint: 'Do it.' }, 2])).not.toThrow();
+  });
 });
 
 describe('withHint schema', () => {

@@ -1,4 +1,5 @@
 const HINT_PROPERTY = { hint: { type: 'string' } };
+const HINT_ONLY_OPTION = { type: 'object', properties: HINT_PROPERTY, additionalProperties: false };
 
 /**
  * Adds `hint` to every object form a rule's first option accepts, so `['error', { max: 50, hint: '…' }]`
@@ -12,10 +13,28 @@ function addHint(schema) {
   return { ...schema, properties: { ...schema.properties, ...HINT_PROPERTY } };
 }
 
-function extendSchema(schema) {
-  if (!Array.isArray(schema) || schema.length === 0) return [{ type: 'object', properties: HINT_PROPERTY, additionalProperties: false }];
-  const [first, ...rest] = schema;
+function addHintToFirst([first, ...rest]) {
   return [addHint(first), ...rest];
+}
+
+/**
+ * A `meta.schema` object describes the whole options array, so `hint` goes into the schema of its first item.
+ * A list (`items: {…}`) becomes a tuple, so later items stay as strict as before.
+ */
+function addHintToOptionsArray(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema.oneOf)) return { ...schema, oneOf: schema.oneOf.map(addHintToOptionsArray) };
+  if (Array.isArray(schema.anyOf)) return { ...schema, anyOf: schema.anyOf.map(addHintToOptionsArray) };
+  const { items } = schema;
+  if (Array.isArray(items)) return items.length === 0 ? schema : { ...schema, items: addHintToFirst(items) };
+  if (items && typeof items === 'object') return { ...schema, items: [addHint(items)], additionalItems: items };
+  return schema;
+}
+
+/** `schema: false` passes through: it switches validation off, and a hint-only schema would turn it back on. */
+function extendSchema(schema) {
+  if (schema === undefined || (Array.isArray(schema) && schema.length === 0)) return [HINT_ONLY_OPTION];
+  return Array.isArray(schema) ? addHintToFirst(schema) : addHintToOptionsArray(schema);
 }
 
 /** Takes `hint` out of the first option, so the wrapped rule sees exactly the options it defines. */
