@@ -57,6 +57,30 @@ describe('protect', () => {
     expect(protectReason(bash(command))).toBeUndefined(),
   );
 
+  describe('in PowerShell', () => {
+    const powershell = (command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
+
+    it.each([
+      "Set-Content mobile/eslint.config.js 'export default []'",
+      "'{}' | Out-File .stylelintrc.json",
+      "Add-Content eslint.config.mjs 'export const x = 1;'",
+      'Remove-Item eslint-suppressions.json',
+      'Move-Item eslint.config.js eslint.config.bak',
+      'Copy-Item other.js eslint.config.js',
+      'New-Item -ItemType File -Force .agent-guard.json',
+      'remove-item .eslintrc.json',
+      'del eslint.config.js',
+      "[IO.File]::WriteAllText('eslint.config.js', '')",
+      "'{}' > .stylelintrc.json",
+      '$env:HUSKY = 0; git commit -m wip',
+      'git commit -m wip --no-verify',
+    ])('blocks the command %s', (command) => expect(protectReason(powershell(command))).toMatch(/not allowed/));
+
+    it.each(['Get-Content eslint.config.js', 'npx eslint src', 'Set-Content src/app.ts $code', 'npm test 2>$null'])('allows the command %s', (command) =>
+      expect(protectReason(powershell(command))).toBeUndefined(),
+    );
+  });
+
   it('answers through the CLI in the Claude Code hook format', () => {
     const output = execFileSync('node', [bin, 'protect'], { input: JSON.stringify(edit('eslint.config.js')), encoding: 'utf8' });
     expect(JSON.parse(output).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' });
