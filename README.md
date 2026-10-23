@@ -22,7 +22,7 @@ It is the TypeScript sibling of [stylelint-plugin-design-system-guard](https://g
 npm install --save-dev eslint eslint-plugin-agent-guard
 ```
 
-Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [Claude Code hooks](#claude-code-hooks).
+Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [Claude Code hooks](#claude-code-hooks), and ships type declarations, so an `eslint.config.ts` type-checks.
 
 ```js
 // eslint.config.js
@@ -130,6 +130,8 @@ export default [
   { rules: { 'local/no-explicit-any': ['error', { hint: 'Use unknown and narrow it with a type guard.' }] } },
 ];
 ```
+
+In an `eslint.config.ts`, take the rule from `@typescript-eslint/eslint-plugin` instead: `tseslint.plugin` is typed without its rules.
 
 ## Claude Code hooks
 

@@ -11,13 +11,13 @@ function packedFiles() {
 }
 
 function sourceFiles() {
-  return ['src', 'bin'].flatMap((dir) => readdirSync(path.join(root, dir), { recursive: true, withFileTypes: true })
+  return ['src', 'bin', 'types'].flatMap((dir) => readdirSync(path.join(root, dir), { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => path.relative(root, path.join(entry.parentPath, entry.name)).replaceAll('\\', '/')));
 }
 
 describe('npm package', () => {
-  it('ships the plugin, the hooks CLI and nothing else', () => {
+  it('ships the plugin, its types, the hooks CLI and nothing else', () => {
     expect(packedFiles()).toEqual(['LICENSE', 'README.md', 'package.json', ...sourceFiles()].sort());
   });
 });
