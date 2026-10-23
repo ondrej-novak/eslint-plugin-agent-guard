@@ -1,5 +1,9 @@
 # eslint-plugin-agent-guard
 
+[![npm](https://img.shields.io/npm/v/eslint-plugin-agent-guard)](https://www.npmjs.com/package/eslint-plugin-agent-guard)
+[![CI](https://github.com/ondrej-novak/eslint-plugin-agent-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/ondrej-novak/eslint-plugin-agent-guard/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/eslint-plugin-agent-guard)](LICENSE)
+
 ESLint rules and Claude Code hooks that keep AI-written code small, named and readable.
 
 AI coding agents write code that works. Left alone, they also write 180-line functions, `setTimeout(run, 10000)` with no hint of what 10000 is, six positional parameters, and `// download the file` above the line that downloads the file. Instructions in `CLAUDE.md` help, but the agent can ignore them. It cannot ignore a lint error that fails the build.
@@ -17,6 +21,8 @@ It is the TypeScript sibling of [stylelint-plugin-design-system-guard](https://g
 ```sh
 npm install --save-dev eslint eslint-plugin-agent-guard
 ```
+
+Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [Claude Code hooks](#claude-code-hooks).
 
 ```js
 // eslint.config.js
@@ -174,6 +180,8 @@ npm install
 npm test
 npm run lint
 ```
+
+To release, bump `version` in `package.json`, merge, then publish a GitHub release tagged `v<version>`. The [release workflow](.github/workflows/release.yml) checks the tag against `package.json`, runs lint and tests, and publishes to npm with provenance. It needs an `NPM_TOKEN` repository secret.
 
 ## License
 
