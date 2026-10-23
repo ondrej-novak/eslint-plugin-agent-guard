@@ -2,8 +2,12 @@ import path from 'node:path';
 import { isProtected, loadSettings, PROTECTED_IN_COMMAND, readText, toProjectPath } from './settings.js';
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 const WRITING_COMMAND = /(\bsed\b[^|;&]*\s-i|\bperl\b[^|;&]*\s-i|(?<![0-9&])>(?!&)|\btee\b|\bmv\b|\bcp\b|\brm\b|\btruncate\b|\bln\b|writeFile|\bgit\s+(checkout|restore|apply|stash))/;
-const SKIPPED_CHECKS = /--no-verify\b|\bHUSKY=0\b|--no-config-lookup\b/;
+/** PowerShell ignores case and writes files through its own cmdlets, their aliases and .NET's File class. */
+const POWERSHELL_WRITING_COMMAND =
+  /\b(?:Set-Content|Add-Content|Clear-Content|Out-File|Tee-Object|New-Item|Copy-Item|Move-Item|Rename-Item|Remove-Item|ni|cpi|copy|mi|move|rni|ren|ri|del|erase|rd|rmdir)\b|\[(?:System\.)?IO\.File\]::(?:Write|Append|Create|Delete|Move|Copy|Replace)/i;
+const SKIPPED_CHECKS = /--no-verify\b|\bHUSKY=0\b|\$env:HUSKY\s*=\s*['"]?0\b|--no-config-lookup\b/i;
 const LINT_KEY = /lint/i;
 
 export const REASON_SUFFIX =
@@ -44,7 +48,8 @@ function checkFileTool(tool, cwd) {
 
 function checkCommand(command) {
   if (SKIPPED_CHECKS.test(command)) return 'Skipping hooks or lint configuration on the command line is not allowed.';
-  if (PROTECTED_IN_COMMAND.test(command) && WRITING_COMMAND.test(command)) return 'This command would change a lint guardrail file, which is not allowed.';
+  const writes = WRITING_COMMAND.test(command) || POWERSHELL_WRITING_COMMAND.test(command);
+  if (PROTECTED_IN_COMMAND.test(command) && writes) return 'This command would change a lint guardrail file, which is not allowed.';
   return undefined;
 }
 
@@ -52,7 +57,7 @@ function checkCommand(command) {
 export function protectReason(tool) {
   const cwd = tool.cwd ?? process.cwd();
   if (FILE_TOOLS.has(tool.tool_name)) return checkFileTool(tool, cwd);
-  if (tool.tool_name === 'Bash') return checkCommand(tool.tool_input?.command ?? '');
+  if (SHELL_TOOLS.has(tool.tool_name)) return checkCommand(tool.tool_input?.command ?? '');
   return undefined;
 }
 

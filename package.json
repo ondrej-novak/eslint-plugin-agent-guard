@@ -2,18 +2,29 @@
   "name": "eslint-plugin-agent-guard",
   "version": "0.1.0",
   "description": "ESLint rules, presets and Claude Code hooks that keep AI-written code small, named and readable.",
+  "homepage": "https://github.com/ondrej-novak/eslint-plugin-agent-guard#readme",
+  "bugs": "https://github.com/ondrej-novak/eslint-plugin-agent-guard/issues",
   "type": "module",
   "main": "src/index.js",
-  "exports": "./src/index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "agent-guard": "bin/agent-guard.mjs"
   },
   "files": [
     "src",
-    "bin"
+    "bin",
+    "types"
   ],
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc -p test/types",
     "lint": "eslint ."
   },
   "keywords": [
@@ -23,7 +34,9 @@
     "ai",
     "agents",
     "claude-code",
-    "guardrails"
+    "guardrails",
+    "lint",
+    "code-quality"
   ],
   "author": "Ondřej Novák",
   "license": "MIT",
@@ -37,10 +50,14 @@
   "peerDependencies": {
     "eslint": "^9.39.0 || ^10.0.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.13.0",
     "stylelint": "^16.26.1",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
   }
