@@ -34,6 +34,19 @@ export default defineConfig(
 );
 ```
 
+A CommonJS config, such as the `eslint.config.js` Expo generates, loads the package with `require()`, which returns the module namespace. Take `.default`:
+
+```js
+// eslint.config.js (CommonJS)
+const { defineConfig, globalIgnores } = require('eslint/config');
+const agentGuard = require('eslint-plugin-agent-guard').default;
+
+module.exports = defineConfig(
+  globalIgnores(['.expo/']),
+  { files: ['**/*.{js,jsx,ts,tsx}'], extends: [agentGuard.configs.react] },
+);
+```
+
 Presets:
 
 | Preset | |
@@ -114,6 +127,8 @@ const PAGE_SIZE_TEN = 10;          // ✓ says what it is for, even if clumsily
 ### Disable comments
 
 The presets set `linterOptions.noInlineConfig`, so `/* eslint-disable */` and `// eslint-disable-next-line` do nothing. If a rule is wrong for a file, change the config, which is a person's decision.
+
+Generated files often start with `/* eslint-disable */`, and ESLint warns that it has no effect. ESLint only skips `node_modules/` and `.git/` on its own, so ignore generated folders such as `.expo/`, `dist/` or `coverage/` with `globalIgnores`, as in the CommonJS example above.
 
 ### Hints on other rules
 
