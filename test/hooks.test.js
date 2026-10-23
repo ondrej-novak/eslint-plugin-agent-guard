@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { lintFeedbackHook } from '../src/hooks/lint-feedback.js';
 import { protectReason } from '../src/hooks/protect.js';
 
@@ -101,6 +102,40 @@ describe('lint feedback', () => {
   it('lints stylesheets with the project stylelint', async () => {
     const result = await lintFeedbackHook(write('a.css', '.a { color: #ggg; }\n'));
     expect(result.reason).toMatch(/color-no-invalid-hex/);
+  });
+});
+
+describe('lint feedback for an app in a subfolder', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'agent-guard-'));
+  const app = path.join(root, 'mobile');
+  const linkedEslint = path.join(app, 'node_modules/eslint');
+  const event = (filePath) => ({ cwd: root, session_id: randomUUID(), tool_name: 'Write', tool_input: { file_path: filePath } });
+
+  beforeAll(() => {
+    mkdirSync(path.join(app, 'src'), { recursive: true });
+    mkdirSync(path.dirname(linkedEslint));
+    symlinkSync(path.join(here, '../node_modules/eslint'), linkedEslint, 'junction');
+    writeFileSync(path.join(app, 'package.json'), '{ "type": "module" }');
+    const plugin = pathToFileURL(path.join(here, '../src/index.js')).href;
+    writeFileSync(path.join(app, 'eslint.config.js'), `import agentGuard from '${plugin}';\nexport default [...agentGuard.configs.recommended];\n`);
+  });
+
+  afterAll(() => {
+    unlinkSync(linkedEslint);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('lints with the ESLint and config of the package around the file when the project root has neither', async () => {
+    writeFileSync(path.join(app, 'src/bad.js'), 'export const wait = (run) => setTimeout(run, 10000);\n');
+    const result = await lintFeedbackHook(event('mobile/src/bad.js'));
+    expect(result.reason).toMatch(/mobile\/src\/bad\.js \(attempt 1 of 3\)[\s\S]*No magic number: 10000/);
+  });
+
+  it('tells the user once per session when it finds no ESLint at all', async () => {
+    writeFileSync(path.join(root, 'loose.js'), 'export const a = 1;\n');
+    const loose = event('loose.js');
+    expect((await lintFeedbackHook(loose)).systemMessage).toMatch(/no ESLint found for loose\.js/);
+    expect(await lintFeedbackHook(loose)).toBeUndefined();
   });
 });
 

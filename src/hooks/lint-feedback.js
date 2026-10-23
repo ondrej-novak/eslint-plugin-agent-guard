@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,14 +10,30 @@ const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const SCRIPT_FILE = /\.(?:[cm]?[jt]sx?)$/;
 const STYLE_FILE = /\.(?:css|scss|sass|less)$/;
 
-/** Loads a linter from the project being edited, not from this package, so the project's version and config apply. */
-async function importFromProject(specifier, cwd) {
+function packageDirectory(directory) {
+  if (existsSync(path.join(directory, 'package.json'))) return directory;
+  const parent = path.dirname(directory);
+  return parent === directory ? undefined : packageDirectory(parent);
+}
+
+async function importFrom(specifier, root) {
   try {
-    const resolved = createRequire(path.join(cwd, 'package.json')).resolve(specifier);
-    return await import(pathToFileURL(resolved).href);
+    const resolved = createRequire(path.join(root, 'package.json')).resolve(specifier);
+    return { module: await import(pathToFileURL(resolved).href), root };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Loads a linter from the project being edited, not from this package, so the project's version and config apply.
+ * Claude's working directory comes first; the nearest package.json above the file covers an app in a subfolder.
+ */
+async function findLinter(specifier, { cwd, file }) {
+  const fromCwd = await importFrom(specifier, cwd);
+  if (fromCwd) return fromCwd;
+  const own = packageDirectory(path.dirname(file));
+  return own ? importFrom(specifier, own) : undefined;
 }
 
 /** Honours eslint-suppressions.json where the installed ESLint supports it, so legacy violations do not count. */
@@ -29,10 +45,9 @@ function createEslint(ESLint, cwd) {
   }
 }
 
-async function runEslint(filePath, cwd) {
-  const module = await importFromProject('eslint', cwd);
-  if (!module?.ESLint) return undefined;
-  const eslint = createEslint(module.ESLint, cwd);
+async function runEslint(filePath, { module, root }) {
+  if (!module.ESLint) return undefined;
+  const eslint = createEslint(module.ESLint, root);
   if (await eslint.isPathIgnored(filePath)) return undefined;
   const errors = module.ESLint.getErrorResults(await eslint.lintFiles([filePath]));
   if (errors.length === 0) return undefined;
@@ -40,28 +55,42 @@ async function runEslint(filePath, cwd) {
   return formatter.format(errors);
 }
 
-async function runStylelint(filePath, cwd) {
-  const module = await importFromProject('stylelint', cwd);
-  const stylelint = module?.default ?? module;
-  if (!stylelint?.lint) return undefined;
-  const outcome = await stylelint.lint({ files: [filePath], cwd, allowEmptyInput: true, formatter: 'string' });
+async function runStylelint(filePath, { module, root }) {
+  const stylelint = module.default ?? module;
+  if (!stylelint.lint) return undefined;
+  const outcome = await stylelint.lint({ files: [filePath], cwd: root, allowEmptyInput: true, formatter: 'string' });
   if (!outcome.errored) return undefined;
   return outcome.report ?? outcome.output;
 }
 
-function attemptsFile(sessionId) {
+const LINTERS = [
+  { files: SCRIPT_FILE, specifier: 'eslint', run: runEslint },
+  { files: STYLE_FILE, specifier: 'stylelint', run: runStylelint, optional: true },
+];
+
+function sessionFile(sessionId, suffix) {
   const directory = path.join(os.tmpdir(), 'agent-guard');
   mkdirSync(directory, { recursive: true });
-  return path.join(directory, `${String(sessionId ?? 'default').replace(/[^\w-]/g, '_')}.json`);
+  return path.join(directory, `${String(sessionId ?? 'default').replace(/[^\w-]/g, '_')}${suffix}`);
 }
 
 /** Counts consecutive failures per file, so passing on one file does not reset another file's count. */
 function recordAttempt({ sessionId, file, failed }) {
-  const store = attemptsFile(sessionId);
+  const store = sessionFile(sessionId, '.json');
   const counts = readText(store, { parse: true }) ?? {};
   counts[file] = failed ? (counts[file] ?? 0) + 1 : 0;
   writeFileSync(store, JSON.stringify(counts));
   return counts[file];
+}
+
+/** Tells the user once per session, so a hook that cannot find ESLint does not stop guarding without anyone knowing. */
+function missingEslintNotice({ sessionId, projectPath }) {
+  const marker = sessionFile(sessionId, '.eslint-missing');
+  if (existsSync(marker)) return undefined;
+  writeFileSync(marker, '');
+  return {
+    systemMessage: `agent-guard: no ESLint found for ${projectPath}, so edits are not linted. Install eslint in the project root or in the nearest package.json folder above the file.`,
+  };
 }
 
 function feedback({ projectPath, output, attempt, maxAttempts }) {
@@ -78,10 +107,12 @@ export async function lintFeedbackHook(tool) {
   if (!filePath) return undefined;
   const cwd = tool.cwd ?? process.cwd();
   const absolute = path.resolve(cwd, filePath);
-  const run = SCRIPT_FILE.test(absolute) ? runEslint : STYLE_FILE.test(absolute) ? runStylelint : undefined;
-  if (!run) return undefined;
-  const output = await run(absolute, cwd);
+  const linter = LINTERS.find(({ files }) => files.test(absolute));
+  if (!linter) return undefined;
   const projectPath = toProjectPath(absolute, cwd);
+  const found = await findLinter(linter.specifier, { cwd, file: absolute });
+  if (!found) return linter.optional ? undefined : missingEslintNotice({ sessionId: tool.session_id, projectPath });
+  const output = await linter.run(absolute, found);
   const attempt = recordAttempt({ sessionId: tool.session_id, file: projectPath, failed: Boolean(output) });
   if (!output) return undefined;
   const { maxAttempts } = loadSettings(cwd);
