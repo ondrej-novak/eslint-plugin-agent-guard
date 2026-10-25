@@ -29,8 +29,18 @@ const PROTECTED_NAMES = [
 
 const PROTECTED_PATHS = [/(^|\/)\.claude\/settings(\.local)?\.json$/i, /(^|\/)\.husky\//i];
 
+/** Only a missing file means "no settings"; any other read error must reach the fail-closed handler. */
+function settingsText(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined;
+    throw new Error(`${SETTINGS_FILE} could not be read: ${error.message}`, { cause: error });
+  }
+}
+
 function readSettings(cwd) {
-  const text = readText(path.join(cwd, SETTINGS_FILE));
+  const text = settingsText(path.join(cwd, SETTINGS_FILE));
   if (text === undefined) return {};
   try {
     return JSON.parse(text) ?? {};

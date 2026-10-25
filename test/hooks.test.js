@@ -77,6 +77,9 @@ describe('protect', () => {
     'git commit --amend -n',
     'git -c core.hooksPath=/dev/null commit -m wip',
     'git config core.hooksPath .nohooks',
+    'git config --unset core.hooksPath',
+    'cd app && git commit -anm wip',
+    'git -C app commit -n',
     'npx eslint --no-config-lookup src',
   ])('blocks the command %s', (command) => expect(protectReason(bash(command))).toMatch(/not allowed/));
 
@@ -88,6 +91,13 @@ describe('protect', () => {
     'git commit --amend --no-edit',
     'git commit -am wip',
     'git push -n origin main',
+    'git config --get core.hooksPath',
+    'git config core.hooksPath',
+    'git commit -minitial',
+    'git commit -uno -m wip',
+    'git log --grep=commit -n 1',
+    'git commit -m "explain the -n flag"',
+    "git commit -q -F - <<'EOF'\nDocument -n in the README\nEOF",
   ])('allows the command %s', (command) => expect(protectReason(bash(command))).toBeUndefined());
 
   describe('in PowerShell', () => {
@@ -140,6 +150,17 @@ describe('protect', () => {
         expect(hookSpecificOutput.permissionDecisionReason).toMatch(/\.agent-guard\.json[\s\S]*tell the user/);
       }
     }));
+
+    it('denies when .agent-guard.json exists but cannot be read', () => {
+      mkdirSync(settingsFile);
+      try {
+        const { hookSpecificOutput } = runCli('protect', JSON.stringify(edit('src/a.ts')));
+        expect(hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(hookSpecificOutput.permissionDecisionReason).toMatch(/\.agent-guard\.json could not be read/);
+      } finally {
+        rmSync(settingsFile, { recursive: true });
+      }
+    });
 
     it('denies when the hook input is not valid JSON', () => {
       expect(runCli('protect', '{').hookSpecificOutput.permissionDecision).toBe('deny');
