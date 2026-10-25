@@ -6,9 +6,15 @@ import { describe, expect, it } from 'vitest';
 
 const root = path.resolve(import.meta.dirname, '..');
 
+/** On Windows npm is a .cmd script, which Node only starts through a shell. */
+const NPM_NEEDS_SHELL = process.platform === 'win32';
+
+/** npm 12 keys the `pack --json` result by package name; earlier versions return an array. */
 function packedFiles() {
-  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: root, encoding: 'utf8' });
-  return JSON.parse(output)[0].files.map(({ path: file }) => file).sort();
+  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: root, encoding: 'utf8', shell: NPM_NEEDS_SHELL });
+  const packed = JSON.parse(output);
+  const [result] = Array.isArray(packed) ? packed : Object.values(packed);
+  return result.files.map(({ path: file }) => file).sort();
 }
 
 function sourceFiles() {

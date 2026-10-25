@@ -13,6 +13,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(here, 'fixtures/project');
 const bin = path.join(here, '../bin/agent-guard.mjs');
 
+/** On Windows npx is a .cmd script, which Node only starts through a shell. */
+const NPX_NEEDS_SHELL = process.platform === 'win32';
+
+/** The first import of stylelint can take over 10 s on a cold Windows machine. */
+const FIRST_IMPORT_TIMEOUT_MS = 30_000;
+
 const edit = (filePath, input = {}) => ({ cwd, tool_name: 'Edit', tool_input: { file_path: filePath, old_string: 'a', new_string: 'b', ...input } });
 const bash = (command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
 
@@ -132,7 +138,7 @@ describe('lint feedback', () => {
     expect(again.reason).toMatch(/attempt 1 of 3/);
   });
 
-  it('lints stylesheets with the project stylelint', async () => {
+  it('lints stylesheets with the project stylelint', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     const result = await lintFeedbackHook(write('a.css', '.a { color: #ggg; }\n'));
     expect(result.reason).toMatch(/color-no-invalid-hex/);
   });
@@ -189,7 +195,7 @@ describe.runIf(apiAppliesSuppressions())('lint feedback with bulk suppressions',
 
   it('does not report violations recorded in eslint-suppressions.json', async () => {
     writeFileSync(file, 'export const wait = (run) => setTimeout(run, 10000);\n');
-    execFileSync('npx', ['eslint', '--suppress-all', 'src/legacy.js'], { cwd, stdio: 'ignore' });
+    execFileSync('npx', ['eslint', '--suppress-all', 'src/legacy.js'], { cwd, stdio: 'ignore', shell: NPX_NEEDS_SHELL });
     const event = { cwd, session_id: randomUUID(), tool_name: 'Edit', tool_input: { file_path: file } };
     expect(await lintFeedbackHook(event)).toBeUndefined();
     writeFileSync(file, 'export const wait = (run) => setTimeout(run, 10000);\nexport const later = (run) => setTimeout(run, 20000);\n');
