@@ -98,9 +98,11 @@ Comment inside a function body. Make the code say it instead: rename, or extract
 
 The article bans every comment. That also removes the comments worth keeping, the ones that say why. Comments inside a function are where the narration happens, and where `eslint-disable-next-line` hides, so this rule draws the line there.
 
+Comments that tools act on are always allowed, because deleting them changes the output: bundler annotations such as `/*#__PURE__*/`, webpack magic comments, `/* @vite-ignore */`, `istanbul`, `c8` and `v8` ignore hints, `node:coverage` and `prettier-ignore`.
+
 | Option | Default | |
 |---|---|---|
-| `allow` | `[]` | Regular expressions. A comment whose trimmed text matches one is allowed, for example `'^@ts-expect-error '` |
+| `allow` | `[]` | Regular expressions for more comments to allow. A comment whose trimmed text matches one is allowed, for example `'^@ts-expect-error '` |
 | `hint` | | Text appended to every message |
 
 ### `no-self-named-constant`
@@ -169,9 +171,9 @@ The package ships a small CLI for two [Claude Code hooks](https://docs.claude.co
 
 The paths assume the package is installed in the project root. For an app in a subfolder, point them at its `node_modules`, for example `$CLAUDE_PROJECT_DIR/mobile/node_modules/eslint-plugin-agent-guard/bin/agent-guard.mjs`.
 
-**`protect`** blocks edits to the lint setup: `eslint.config.*`, `.eslintrc*`, `.eslintignore`, `eslint-suppressions.json`, the same files for Stylelint, `.agent-guard.json`, `.claude/settings*.json` and `.husky/`. It also blocks changes to lint scripts and inline lint configs in `package.json`, Bash and PowerShell commands that write to those files, and `--no-verify` or `HUSKY=0`. The message tells the agent it may stop and explain why a rule makes the task impossible. A person then decides.
+**`protect`** blocks edits to the lint setup: `eslint.config.*`, `.eslintrc*`, `.eslintignore`, `eslint-suppressions.json`, the same files for Stylelint, `.agent-guard.json`, `.claude/settings*.json` and `.husky/`. It also blocks changes to lint scripts (any script whose name or command mentions lint) and inline lint configs in `package.json`, while other `package.json` edits such as adding a dependency go through, Bash and PowerShell commands that write to those files (with `/` or `\` in the path), and skipping git hooks with `--no-verify`, `git commit -n`, a changed `core.hooksPath` or `HUSKY=0`. The message tells the agent it may stop and explain why a rule makes the task impossible. A person then decides.
 
-**`lint`** runs after every edit. JavaScript and TypeScript files go through the project's ESLint, stylesheets through its Stylelint when installed. Both are loaded from the project root, or, when the root has none, from the nearest folder above the edited file that has a `package.json`, so an app in `mobile/` is linted with its own ESLint and config. Errors go straight back to the agent. Failures are counted per file, so passing on one file does not reset another. After three failures in a row the agent is told to stop and report. If no ESLint is found at all, Claude Code shows you a notice once per session instead of the hook quietly doing nothing.
+**`lint`** runs after every edit. JavaScript and TypeScript files go through the project's ESLint, stylesheets through its Stylelint when installed. Both are loaded from the project root, or, when the root has none, from the nearest folder above the edited file that has a `package.json`, so an app in `mobile/` is linted with its own ESLint and config. Errors go straight back to the agent. Failures are counted per file, so passing on one file does not reset another. After three failures in a row the agent is told to stop and report. If no ESLint is found at all, or a linter cannot run, for example Stylelint without a config, Claude Code shows you a notice once per session instead of the hook quietly doing nothing.
 
 Both are optional. `.agent-guard.json` in the project root adjusts them:
 
@@ -183,6 +185,8 @@ Both are optional. `.agent-guard.json` in the project root adjusts them:
 ```
 
 `protect` adds regular expressions tested against the path relative to the project. All protected names and patterns are matched without regard to case, because on Windows and macOS `ESLint.config.js` is the same file as `eslint.config.js`.
+
+If `.agent-guard.json` is invalid, or a hook fails for any other reason, `protect` blocks the tool call and says why, and `lint` tells you the edit went unlinted. Claude Code lets a tool call through when its hook crashes, so a guard that crashed silently would be off.
 
 A matching instruction for the agent is in [`examples/.claude/rules/code-shape.md`](examples/.claude/rules/code-shape.md). The rules hold either way; the instruction saves the agent a few failed attempts.
 

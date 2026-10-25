@@ -83,14 +83,20 @@ function recordAttempt({ sessionId, file, failed }) {
   return counts[file];
 }
 
-/** Tells the user once per session, so a hook that cannot find ESLint does not stop guarding without anyone knowing. */
-function missingEslintNotice({ sessionId, projectPath }) {
-  const marker = sessionFile(sessionId, '.eslint-missing');
+/** Tells the user once per session, so a hook that cannot lint does not stop guarding without anyone knowing. */
+function noticeOnce({ sessionId, topic, message }) {
+  const marker = sessionFile(sessionId, `.${topic}`);
   if (existsSync(marker)) return undefined;
   writeFileSync(marker, '');
-  return {
-    systemMessage: `agent-guard: no ESLint found for ${projectPath}, so edits are not linted. Install eslint in the project root or in the nearest package.json folder above the file.`,
-  };
+  return { systemMessage: `agent-guard: ${message}` };
+}
+
+async function lintOutput(linter, { file, found }) {
+  try {
+    return { output: await linter.run(file, found) };
+  } catch (error) {
+    return { error };
+  }
 }
 
 function feedback({ projectPath, output, attempt, maxAttempts }) {
@@ -98,6 +104,11 @@ function feedback({ projectPath, output, attempt, maxAttempts }) {
     return `STOP. ${projectPath} has failed lint ${attempt} times in a row. Do not try again and do not weaken the lint setup. ${REASON_SUFFIX}\n${output}`;
   }
   return `Lint failed for ${projectPath} (attempt ${attempt} of ${maxAttempts}). Fix these errors without disable comments:\n${output}`;
+}
+
+/** A crash would only show as a hook error, so the user is told that the edit went unlinted. */
+export function lintFailure(error) {
+  return { systemMessage: `agent-guard: the lint hook failed (${error.message}), so this edit was not linted.` };
 }
 
 /** Lints the file a tool just wrote and hands any errors back to the agent. */
@@ -110,10 +121,19 @@ export async function lintFeedbackHook(tool) {
   const linter = LINTERS.find(({ files }) => files.test(absolute));
   if (!linter) return undefined;
   const projectPath = toProjectPath(absolute, cwd);
+  const sessionId = tool.session_id;
   const found = await findLinter(linter.specifier, { cwd, file: absolute });
-  if (!found) return linter.optional ? undefined : missingEslintNotice({ sessionId: tool.session_id, projectPath });
-  const output = await linter.run(absolute, found);
-  const attempt = recordAttempt({ sessionId: tool.session_id, file: projectPath, failed: Boolean(output) });
+  if (!found) {
+    if (linter.optional) return undefined;
+    const message = `no ESLint found for ${projectPath}, so edits are not linted. Install eslint in the project root or in the nearest package.json folder above the file.`;
+    return noticeOnce({ sessionId, topic: 'eslint-missing', message });
+  }
+  const { output, error } = await lintOutput(linter, { file: absolute, found });
+  if (error) {
+    const message = `${linter.specifier} could not lint ${projectPath} (${error.message}), so edits like this are not linted. Check its config.`;
+    return noticeOnce({ sessionId, topic: `${linter.specifier}-error`, message });
+  }
+  const attempt = recordAttempt({ sessionId, file: projectPath, failed: Boolean(output) });
   if (!output) return undefined;
   const { maxAttempts } = loadSettings(cwd);
   return { decision: 'block', reason: feedback({ projectPath, output, attempt, maxAttempts }) };
