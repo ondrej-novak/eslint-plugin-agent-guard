@@ -73,12 +73,22 @@ describe('protect', () => {
     'rm ESLint.config.js',
     'git checkout -- eslint.config.js',
     'git commit -m wip --no-verify',
+    'git commit -nm wip',
+    'git commit --amend -n',
+    'git -c core.hooksPath=/dev/null commit -m wip',
+    'git config core.hooksPath .nohooks',
     'npx eslint --no-config-lookup src',
   ])('blocks the command %s', (command) => expect(protectReason(bash(command))).toMatch(/not allowed/));
 
-  it.each(['cat eslint.config.js', 'cat eslint.config.js 2>/dev/null', 'npx eslint src', 'npm test > out.txt'])('allows the command %s', (command) =>
-    expect(protectReason(bash(command))).toBeUndefined(),
-  );
+  it.each([
+    'cat eslint.config.js',
+    'cat eslint.config.js 2>/dev/null',
+    'npx eslint src',
+    'npm test > out.txt',
+    'git commit --amend --no-edit',
+    'git commit -am wip',
+    'git push -n origin main',
+  ])('allows the command %s', (command) => expect(protectReason(bash(command))).toBeUndefined());
 
   describe('in PowerShell', () => {
     const powershell = (command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
@@ -94,6 +104,8 @@ describe('protect', () => {
       'remove-item .eslintrc.json',
       'del eslint.config.js',
       "Set-Content ESLINT.CONFIG.JS ''",
+      "Set-Content .claude\\settings.json '{}'",
+      'Remove-Item .husky\\pre-commit',
       "[IO.File]::WriteAllText('eslint.config.js', '')",
       "'{}' > .stylelintrc.json",
       '$env:HUSKY = 0; git commit -m wip',

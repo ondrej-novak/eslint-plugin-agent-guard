@@ -7,7 +7,9 @@ const WRITING_COMMAND = /(\bsed\b[^|;&]*\s-i|\bperl\b[^|;&]*\s-i|(?<![0-9&])>(?!
 /** PowerShell ignores case and writes files through its own cmdlets, their aliases and .NET's File class. */
 const POWERSHELL_WRITING_COMMAND =
   /\b(?:Set-Content|Add-Content|Clear-Content|Out-File|Tee-Object|New-Item|Copy-Item|Move-Item|Rename-Item|Remove-Item|ni|cpi|copy|mi|move|rni|ren|ri|del|erase|rd|rmdir)\b|\[(?:System\.)?IO\.File\]::(?:Write|Append|Create|Delete|Move|Copy|Replace)/i;
-const SKIPPED_CHECKS = /--no-verify\b|\bHUSKY=0\b|\$env:HUSKY\s*=\s*['"]?0\b|--no-config-lookup\b/i;
+/** `-n` is short for `--no-verify` only on `git commit`; on `git push` it means a dry run. */
+const SKIPPED_CHECKS =
+  /--no-verify\b|\bgit\b[^|;&]*\bcommit\b[^|;&]*\s-[a-z]*n|\bcore\.hooksPath\b|\bHUSKY=0\b|\$env:HUSKY\s*=\s*['"]?0\b|--no-config-lookup\b/i;
 const LINT_KEY = /lint/i;
 
 export const REASON_SUFFIX =
@@ -53,7 +55,7 @@ function checkFileTool(tool, { cwd, settings }) {
 function checkCommand(command) {
   if (SKIPPED_CHECKS.test(command)) return 'Skipping hooks or lint configuration on the command line is not allowed.';
   const writes = WRITING_COMMAND.test(command) || POWERSHELL_WRITING_COMMAND.test(command);
-  if (PROTECTED_IN_COMMAND.test(command) && writes) return 'This command would change a lint guardrail file, which is not allowed.';
+  if (PROTECTED_IN_COMMAND.test(command.replaceAll('\\', '/')) && writes) return 'This command would change a lint guardrail file, which is not allowed.';
   return undefined;
 }
 
