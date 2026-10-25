@@ -40,11 +40,20 @@ describe('protect', () => {
 
   it('blocks lint script changes in package.json but allows other changes', () => {
     expect(protectReason(edit('package.json', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
-    expect(protectReason(edit('PACKAGE.JSON', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
     expect(protectReason(edit('package.json', { old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' }))).toBeUndefined();
-    const write = (content) => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: 'package.json', content } });
+    const write = (content, filePath = 'package.json') => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: filePath, content } });
     expect(write('{ "name": "fixture-project", "scripts": { "lint": "eslint .", "build": "vite build" } }')).toBeUndefined();
     expect(write('{ "name": "fixture-project", "scripts": { "build": "tsc" } }')).toMatch(/lint scripts/);
+    expect(write('{ "scripts": { "lint": "echo ok" } }', 'PACKAGE.JSON')).toMatch(/lint scripts/);
+  });
+
+  it('judges a package.json edit by the lint setup it leaves behind, not by the word lint', () => {
+    expect(protectReason(edit('package.json', { old_string: '"private": true', new_string: '"private": true, "devDependencies": { "eslint": "^10.0.0" }' }))).toBeUndefined();
+    expect(protectReason(edit('package.json', { old_string: ' ."', new_string: ' . || true"' }))).toMatch(/lint scripts/);
+    const edits = [{ old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' }, { old_string: 'eslint .', new_string: 'eslint src' }];
+    expect(protectReason({ cwd, tool_name: 'MultiEdit', tool_input: { file_path: 'package.json', edits } })).toMatch(/lint scripts/);
+    const write = (content) => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: 'package.json', content } });
+    expect(write('{ "name": "fixture-project", "scripts": { "lint": "eslint .", "build": "tsc", "test": "eslint . && vitest" } }')).toMatch(/lint scripts/);
   });
 
   it('honours extra patterns from .agent-guard.json', () => {
