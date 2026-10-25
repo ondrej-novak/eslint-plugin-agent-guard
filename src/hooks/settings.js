@@ -15,18 +15,19 @@ export const SETTINGS_FILE = '.agent-guard.json';
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 
+/** Matched without case: on Windows and macOS, `ESLint.config.js` opens the same file as `eslint.config.js`. */
 const PROTECTED_NAMES = [
-  /^eslint\.config\.[cm]?[jt]s$/,
-  /^\.eslintrc(\.\w+)?$/,
-  /^\.eslintignore$/,
-  /^eslint-suppressions\.json$/,
-  /^stylelint\.config\.[cm]?[jt]s$/,
-  /^\.stylelintrc(\.\w+)?$/,
-  /^\.stylelintignore$/,
-  /^\.agent-guard\.json$/,
+  /^eslint\.config\.[cm]?[jt]s$/i,
+  /^\.eslintrc(\.\w+)?$/i,
+  /^\.eslintignore$/i,
+  /^eslint-suppressions\.json$/i,
+  /^stylelint\.config\.[cm]?[jt]s$/i,
+  /^\.stylelintrc(\.\w+)?$/i,
+  /^\.stylelintignore$/i,
+  /^\.agent-guard\.json$/i,
 ];
 
-const PROTECTED_PATHS = [/(^|\/)\.claude\/settings(\.local)?\.json$/, /(^|\/)\.husky\//];
+const PROTECTED_PATHS = [/(^|\/)\.claude\/settings(\.local)?\.json$/i, /(^|\/)\.husky\//i];
 
 /**
  * Reads `.agent-guard.json` from the project root. `protect` adds regular expressions tested against
@@ -36,7 +37,7 @@ export function loadSettings(cwd) {
   const user = readText(path.join(cwd, SETTINGS_FILE), { parse: true }) ?? {};
   return {
     maxAttempts: Number.isInteger(user.maxAttempts) && user.maxAttempts > 0 ? user.maxAttempts : DEFAULT_MAX_ATTEMPTS,
-    protectedPaths: [...PROTECTED_PATHS, ...(user.protect ?? []).map((pattern) => new RegExp(pattern, 'u'))],
+    protectedPaths: [...PROTECTED_PATHS, ...(user.protect ?? []).map((pattern) => new RegExp(pattern, 'iu'))],
   };
 }
 
@@ -50,4 +51,4 @@ export function isProtected(projectPath, settings) {
 }
 
 /** The same names, as text to look for inside a shell command. */
-export const PROTECTED_IN_COMMAND = /eslint\.config\.|\.eslintrc|\.eslintignore|eslint-suppressions\.json|stylelint\.config\.|\.stylelintrc|\.stylelintignore|\.agent-guard\.json|\.claude\/settings|\.husky\//;
+export const PROTECTED_IN_COMMAND = /eslint\.config\.|\.eslintrc|\.eslintignore|eslint-suppressions\.json|stylelint\.config\.|\.stylelintrc|\.stylelintignore|\.agent-guard\.json|\.claude\/settings|\.husky\//i;

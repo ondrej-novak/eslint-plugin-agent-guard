@@ -22,6 +22,11 @@ describe('protect', () => {
     (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
   );
 
+  it.each(['ESLint.config.js', '.ESLINTRC.json', 'Eslint-Suppressions.json', '.Claude/Settings.json'])(
+    'blocks edits to %s, because file names ignore case on Windows and macOS',
+    (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
+  );
+
   it('allows edits to source files', () => {
     expect(protectReason(edit(path.join(cwd, 'src/service.ts')))).toBeUndefined();
     expect(protectReason({ ...edit('src/a.ts'), tool_name: 'Write', tool_input: { file_path: 'src/a.ts', content: '' } })).toBeUndefined();
@@ -29,6 +34,7 @@ describe('protect', () => {
 
   it('blocks lint script changes in package.json but allows other changes', () => {
     expect(protectReason(edit('package.json', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
+    expect(protectReason(edit('PACKAGE.JSON', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
     expect(protectReason(edit('package.json', { old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' }))).toBeUndefined();
     const write = (content) => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: 'package.json', content } });
     expect(write('{ "name": "fixture-project", "scripts": { "lint": "eslint .", "build": "vite build" } }')).toBeUndefined();
@@ -39,6 +45,7 @@ describe('protect', () => {
     writeFileSync(path.join(cwd, '.agent-guard.json'), JSON.stringify({ protect: ['^src/generated/'] }));
     try {
       expect(protectReason(edit('src/generated/api.ts'))).toMatch(/not allowed/);
+      expect(protectReason(edit('SRC/Generated/api.ts'))).toMatch(/not allowed/);
     } finally {
       rmSync(path.join(cwd, '.agent-guard.json'));
     }
@@ -48,6 +55,7 @@ describe('protect', () => {
     "sed -i 's/50/100/' eslint.config.js",
     'echo "{}" > .stylelintrc.json',
     'rm eslint.config.mjs',
+    'rm ESLint.config.js',
     'git checkout -- eslint.config.js',
     'git commit -m wip --no-verify',
     'npx eslint --no-config-lookup src',
@@ -70,6 +78,7 @@ describe('protect', () => {
       'New-Item -ItemType File -Force .agent-guard.json',
       'remove-item .eslintrc.json',
       'del eslint.config.js',
+      "Set-Content ESLINT.CONFIG.JS ''",
       "[IO.File]::WriteAllText('eslint.config.js', '')",
       "'{}' > .stylelintrc.json",
       '$env:HUSKY = 0; git commit -m wip',
