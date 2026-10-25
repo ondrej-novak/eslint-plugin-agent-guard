@@ -98,9 +98,11 @@ Comment inside a function body. Make the code say it instead: rename, or extract
 
 The article bans every comment. That also removes the comments worth keeping, the ones that say why. Comments inside a function are where the narration happens, and where `eslint-disable-next-line` hides, so this rule draws the line there.
 
+Comments that tools act on are always allowed, because deleting them changes the output: bundler annotations such as `/*#__PURE__*/`, webpack magic comments, `/* @vite-ignore */`, `istanbul`, `c8` and `v8` ignore hints, `node:coverage` and `prettier-ignore`.
+
 | Option | Default | |
 |---|---|---|
-| `allow` | `[]` | Regular expressions. A comment whose trimmed text matches one is allowed, for example `'^@ts-expect-error '` |
+| `allow` | `[]` | Regular expressions for more comments to allow. A comment whose trimmed text matches one is allowed, for example `'^@ts-expect-error '` |
 | `hint` | | Text appended to every message |
 
 ### `no-self-named-constant`
