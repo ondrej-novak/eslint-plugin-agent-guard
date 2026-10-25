@@ -22,7 +22,7 @@ It is the TypeScript sibling of [stylelint-plugin-design-system-guard](https://g
 npm install --save-dev eslint eslint-plugin-agent-guard
 ```
 
-Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [Claude Code hooks](#claude-code-hooks).
+Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [Claude Code hooks](#claude-code-hooks), and ships type declarations, so an `eslint.config.ts` type-checks.
 
 ```js
 // eslint.config.js
@@ -31,6 +31,19 @@ import agentGuard from 'eslint-plugin-agent-guard';
 
 export default defineConfig(
   { files: ['**/*.{js,jsx,ts,tsx}'], extends: [agentGuard.configs.recommended] },
+);
+```
+
+A CommonJS config, such as the `eslint.config.js` Expo generates, loads the package with `require()`, which returns the module namespace. Take `.default`:
+
+```js
+// eslint.config.js (CommonJS)
+const { defineConfig, globalIgnores } = require('eslint/config');
+const agentGuard = require('eslint-plugin-agent-guard').default;
+
+module.exports = defineConfig(
+  globalIgnores(['.expo/']),
+  { files: ['**/*.{js,jsx,ts,tsx}'], extends: [agentGuard.configs.react] },
 );
 ```
 
@@ -115,6 +128,8 @@ const PAGE_SIZE_TEN = 10;          // ✓ says what it is for, even if clumsily
 
 The presets set `linterOptions.noInlineConfig`, so `/* eslint-disable */` and `// eslint-disable-next-line` do nothing. If a rule is wrong for a file, change the config, which is a person's decision.
 
+Generated files often start with `/* eslint-disable */`, and ESLint warns that it has no effect. ESLint only skips `node_modules/` and `.git/` on its own, so ignore generated folders such as `.expo/`, `dist/` or `coverage/` with `globalIgnores`, as in the CommonJS example above.
+
 ### Hints on other rules
 
 `withHint` wraps any rule, so other plugins' rules can carry hints too:
@@ -131,6 +146,8 @@ export default [
 ];
 ```
 
+In an `eslint.config.ts`, take the rule from `@typescript-eslint/eslint-plugin` instead: `tseslint.plugin` is typed without its rules.
+
 ## Claude Code hooks
 
 The package ships a small CLI for two [Claude Code hooks](https://docs.claude.com/en/docs/claude-code/hooks). Copy [`examples/.claude/settings.json`](examples/.claude/settings.json) into your project:
@@ -139,7 +156,7 @@ The package ships a small CLI for two [Claude Code hooks](https://docs.claude.co
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+      { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
         "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/eslint-plugin-agent-guard/bin/agent-guard.mjs\" protect" }] }
     ],
     "PostToolUse": [
@@ -150,9 +167,11 @@ The package ships a small CLI for two [Claude Code hooks](https://docs.claude.co
 }
 ```
 
-**`protect`** blocks edits to the lint setup: `eslint.config.*`, `.eslintrc*`, `.eslintignore`, `eslint-suppressions.json`, the same files for Stylelint, `.agent-guard.json`, `.claude/settings*.json` and `.husky/`. It also blocks changes to lint scripts and inline lint configs in `package.json`, shell commands that write to those files, and `--no-verify`. The message tells the agent it may stop and explain why a rule makes the task impossible. A person then decides.
+The paths assume the package is installed in the project root. For an app in a subfolder, point them at its `node_modules`, for example `$CLAUDE_PROJECT_DIR/mobile/node_modules/eslint-plugin-agent-guard/bin/agent-guard.mjs`.
 
-**`lint`** runs after every edit. JavaScript and TypeScript files go through the project's ESLint, stylesheets through its Stylelint when installed. Errors go straight back to the agent. Failures are counted per file, so passing on one file does not reset another. After three failures in a row the agent is told to stop and report.
+**`protect`** blocks edits to the lint setup: `eslint.config.*`, `.eslintrc*`, `.eslintignore`, `eslint-suppressions.json`, the same files for Stylelint, `.agent-guard.json`, `.claude/settings*.json` and `.husky/`. It also blocks changes to lint scripts and inline lint configs in `package.json`, Bash and PowerShell commands that write to those files, and `--no-verify` or `HUSKY=0`. The message tells the agent it may stop and explain why a rule makes the task impossible. A person then decides.
+
+**`lint`** runs after every edit. JavaScript and TypeScript files go through the project's ESLint, stylesheets through its Stylelint when installed. Both are loaded from the project root, or, when the root has none, from the nearest folder above the edited file that has a `package.json`, so an app in `mobile/` is linted with its own ESLint and config. Errors go straight back to the agent. Failures are counted per file, so passing on one file does not reset another. After three failures in a row the agent is told to stop and report. If no ESLint is found at all, Claude Code shows you a notice once per session instead of the hook quietly doing nothing.
 
 Both are optional. `.agent-guard.json` in the project root adjusts them:
 

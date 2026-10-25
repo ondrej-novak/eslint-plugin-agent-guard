@@ -10,16 +10,18 @@ Sister project of [stylelint-plugin-design-system-guard](https://github.com/ondr
 - `src/rules/no-self-named-constant.js` and `src/rules/no-body-comments.js` are the two rules of our own.
 - `src/configs.js` builds the `recommended`, `react` and `angular` presets.
 - `src/hooks/` holds the Claude Code hooks, run through `bin/agent-guard.mjs protect|lint`.
+- `types/index.d.ts` is the hand-written type declaration for the package. `test/types/usage.ts` uses it the way a typed `eslint.config.ts` would.
 - `test/` uses vitest and ESLint's `RuleTester`. `test/fixtures/project` is a tiny project the hook tests lint.
 
 ## Commands
 
 ```sh
-npm test        # vitest
-npm run lint    # this repo is linted with its own recommended preset
+npm test            # vitest
+npm run lint        # this repo is linted with its own recommended preset
+npm run typecheck   # tsc over test/types, against types/index.d.ts
 ```
 
-Run both before you say a change is done. CI runs them on Node 22 and 24 with ESLint 9 and 10.
+Run all three before you say a change is done. CI runs them on Node 22 and 24 with ESLint 9 and 10.
 
 ## How we write code here
 

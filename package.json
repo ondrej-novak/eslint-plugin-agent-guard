@@ -6,8 +6,12 @@
   "bugs": "https://github.com/ondrej-novak/eslint-plugin-agent-guard/issues",
   "type": "module",
   "main": "src/index.js",
+  "types": "types/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -15,10 +19,12 @@
   },
   "files": [
     "src",
-    "bin"
+    "bin",
+    "types"
   ],
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc -p test/types",
     "lint": "eslint ."
   },
   "keywords": [
@@ -51,6 +57,7 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.13.0",
     "stylelint": "^16.26.1",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
   }
