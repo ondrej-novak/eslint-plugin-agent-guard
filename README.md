@@ -182,7 +182,7 @@ Both are optional. `.agent-guard.json` in the project root adjusts them:
 }
 ```
 
-`protect` adds regular expressions tested against the path relative to the project.
+`protect` adds regular expressions tested against the path relative to the project. All protected names and patterns are matched without regard to case, because on Windows and macOS `ESLint.config.js` is the same file as `eslint.config.js`.
 
 A matching instruction for the agent is in [`examples/.claude/rules/code-shape.md`](examples/.claude/rules/code-shape.md). The rules hold either way; the instruction saves the agent a few failed attempts.
 

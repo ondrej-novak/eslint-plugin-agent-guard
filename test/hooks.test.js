@@ -13,12 +13,23 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(here, 'fixtures/project');
 const bin = path.join(here, '../bin/agent-guard.mjs');
 
+/** On Windows npx is a .cmd script, which Node only starts through a shell. */
+const NPX_NEEDS_SHELL = process.platform === 'win32';
+
+/** The first import of stylelint can take over 10 s on a cold Windows machine. */
+const FIRST_IMPORT_TIMEOUT_MS = 30_000;
+
 const edit = (filePath, input = {}) => ({ cwd, tool_name: 'Edit', tool_input: { file_path: filePath, old_string: 'a', new_string: 'b', ...input } });
 const bash = (command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
 
 describe('protect', () => {
   it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json'])(
     'blocks edits to %s',
+    (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
+  );
+
+  it.each(['ESLint.config.js', '.ESLINTRC.json', 'Eslint-Suppressions.json', '.Claude/Settings.json'])(
+    'blocks edits to %s, because file names ignore case on Windows and macOS',
     (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
   );
 
@@ -29,6 +40,7 @@ describe('protect', () => {
 
   it('blocks lint script changes in package.json but allows other changes', () => {
     expect(protectReason(edit('package.json', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
+    expect(protectReason(edit('PACKAGE.JSON', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
     expect(protectReason(edit('package.json', { old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' }))).toBeUndefined();
     const write = (content) => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: 'package.json', content } });
     expect(write('{ "name": "fixture-project", "scripts": { "lint": "eslint .", "build": "vite build" } }')).toBeUndefined();
@@ -39,6 +51,7 @@ describe('protect', () => {
     writeFileSync(path.join(cwd, '.agent-guard.json'), JSON.stringify({ protect: ['^src/generated/'] }));
     try {
       expect(protectReason(edit('src/generated/api.ts'))).toMatch(/not allowed/);
+      expect(protectReason(edit('SRC/Generated/api.ts'))).toMatch(/not allowed/);
     } finally {
       rmSync(path.join(cwd, '.agent-guard.json'));
     }
@@ -48,6 +61,7 @@ describe('protect', () => {
     "sed -i 's/50/100/' eslint.config.js",
     'echo "{}" > .stylelintrc.json',
     'rm eslint.config.mjs',
+    'rm ESLint.config.js',
     'git checkout -- eslint.config.js',
     'git commit -m wip --no-verify',
     'npx eslint --no-config-lookup src',
@@ -70,6 +84,7 @@ describe('protect', () => {
       'New-Item -ItemType File -Force .agent-guard.json',
       'remove-item .eslintrc.json',
       'del eslint.config.js',
+      "Set-Content ESLINT.CONFIG.JS ''",
       "[IO.File]::WriteAllText('eslint.config.js', '')",
       "'{}' > .stylelintrc.json",
       '$env:HUSKY = 0; git commit -m wip',
@@ -123,7 +138,7 @@ describe('lint feedback', () => {
     expect(again.reason).toMatch(/attempt 1 of 3/);
   });
 
-  it('lints stylesheets with the project stylelint', async () => {
+  it('lints stylesheets with the project stylelint', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     const result = await lintFeedbackHook(write('a.css', '.a { color: #ggg; }\n'));
     expect(result.reason).toMatch(/color-no-invalid-hex/);
   });
@@ -180,7 +195,7 @@ describe.runIf(apiAppliesSuppressions())('lint feedback with bulk suppressions',
 
   it('does not report violations recorded in eslint-suppressions.json', async () => {
     writeFileSync(file, 'export const wait = (run) => setTimeout(run, 10000);\n');
-    execFileSync('npx', ['eslint', '--suppress-all', 'src/legacy.js'], { cwd, stdio: 'ignore' });
+    execFileSync('npx', ['eslint', '--suppress-all', 'src/legacy.js'], { cwd, stdio: 'ignore', shell: NPX_NEEDS_SHELL });
     const event = { cwd, session_id: randomUUID(), tool_name: 'Edit', tool_input: { file_path: file } };
     expect(await lintFeedbackHook(event)).toBeUndefined();
     writeFileSync(file, 'export const wait = (run) => setTimeout(run, 10000);\nexport const later = (run) => setTimeout(run, 20000);\n');

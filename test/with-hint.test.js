@@ -99,8 +99,11 @@ describe('withHint schema', () => {
   });
 });
 
+/** The first import of typescript-eslint can take over 10 s on a cold Windows machine. */
+const FIRST_IMPORT_TIMEOUT_MS = 30_000;
+
 describe('withHint on a typescript-eslint rule', () => {
-  it('appends the hint and keeps the rule options', async () => {
+  it('appends the hint and keeps the rule options', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     const { default: tseslint } = await import('typescript-eslint');
     const local = { rules: { 'no-explicit-any': withHint(tseslint.plugin.rules['no-explicit-any']) } };
     const messages = new Linter().verify(

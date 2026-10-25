@@ -40,7 +40,7 @@ function checkFileTool(tool, cwd) {
   if (!filePath) return undefined;
   const projectPath = toProjectPath(filePath, cwd);
   if (isProtected(projectPath, loadSettings(cwd))) return `Editing ${projectPath} is not allowed: it configures the lint guardrails.`;
-  if (path.basename(projectPath) === 'package.json' && touchesLintInPackageJson(tool, path.resolve(cwd, filePath))) {
+  if (path.basename(projectPath).toLowerCase() === 'package.json' && touchesLintInPackageJson(tool, path.resolve(cwd, filePath))) {
     return `Changing lint scripts or lint configuration in ${projectPath} is not allowed.`;
   }
   return undefined;
