@@ -96,6 +96,39 @@ describe('protect', () => {
     );
   });
 
+  describe('when it cannot check a tool call', () => {
+    const settingsFile = path.join(cwd, '.agent-guard.json');
+    const runCli = (hook, input) => JSON.parse(execFileSync('node', [bin, hook], { input, encoding: 'utf8' }));
+    const withSettings = (text, check) => {
+      writeFileSync(settingsFile, text);
+      try {
+        check();
+      } finally {
+        rmSync(settingsFile);
+      }
+    };
+
+    it.each([
+      ['"protect" is not a list', '{ "protect": "^src/generated/" }'],
+      ['a pattern is not a valid regular expression', '{ "protect": ["["] }'],
+      ['the file is not valid JSON', '{ "protect": ['],
+    ])('denies edits and commands when %s in .agent-guard.json', (_, text) => withSettings(text, () => {
+      for (const event of [edit('src/a.ts'), bash('npm test')]) {
+        const { hookSpecificOutput } = runCli('protect', JSON.stringify(event));
+        expect(hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(hookSpecificOutput.permissionDecisionReason).toMatch(/\.agent-guard\.json[\s\S]*tell the user/);
+      }
+    }));
+
+    it('denies when the hook input is not valid JSON', () => {
+      expect(runCli('protect', '{').hookSpecificOutput.permissionDecision).toBe('deny');
+    });
+
+    it('tells the user when the lint hook fails', () => {
+      expect(runCli('lint', '{').systemMessage).toMatch(/lint hook failed/);
+    });
+  });
+
   it('answers through the CLI in the Claude Code hook format', () => {
     const output = execFileSync('node', [bin, 'protect'], { input: JSON.stringify(edit('eslint.config.js')), encoding: 'utf8' });
     expect(JSON.parse(output).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' });

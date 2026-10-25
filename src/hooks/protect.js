@@ -34,12 +34,12 @@ function touchesLintInPackageJson(tool, filePath) {
   return edits.some((edit) => LINT_KEY.test(`${edit.old_string ?? ''}\n${edit.new_string ?? ''}`));
 }
 
-function checkFileTool(tool, cwd) {
+function checkFileTool(tool, { cwd, settings }) {
   const input = tool.tool_input ?? {};
   const filePath = input.file_path ?? input.notebook_path;
   if (!filePath) return undefined;
   const projectPath = toProjectPath(filePath, cwd);
-  if (isProtected(projectPath, loadSettings(cwd))) return `Editing ${projectPath} is not allowed: it configures the lint guardrails.`;
+  if (isProtected(projectPath, settings)) return `Editing ${projectPath} is not allowed: it configures the lint guardrails.`;
   if (path.basename(projectPath).toLowerCase() === 'package.json' && touchesLintInPackageJson(tool, path.resolve(cwd, filePath))) {
     return `Changing lint scripts or lint configuration in ${projectPath} is not allowed.`;
   }
@@ -56,19 +56,22 @@ function checkCommand(command) {
 /** Returns why a tool call must not run, or undefined when it may. */
 export function protectReason(tool) {
   const cwd = tool.cwd ?? process.cwd();
-  if (FILE_TOOLS.has(tool.tool_name)) return checkFileTool(tool, cwd);
+  const settings = loadSettings(cwd);
+  if (FILE_TOOLS.has(tool.tool_name)) return checkFileTool(tool, { cwd, settings });
   if (SHELL_TOOLS.has(tool.tool_name)) return checkCommand(tool.tool_input?.command ?? '');
   return undefined;
 }
 
+function deny(reason) {
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
+}
+
 export function protectHook(tool) {
   const reason = protectReason(tool);
-  if (!reason) return undefined;
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: `${reason} ${REASON_SUFFIX}`,
-    },
-  };
+  return reason ? deny(`${reason} ${REASON_SUFFIX}`) : undefined;
+}
+
+/** Claude Code lets a tool call through when its hook exits with an error, so a crash has to deny. */
+export function protectFailure(error) {
+  return deny(`agent-guard could not check this tool call, so it is blocked: ${error.message}. Stop and tell the user; only they can fix this.`);
 }

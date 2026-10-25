@@ -29,15 +29,41 @@ const PROTECTED_NAMES = [
 
 const PROTECTED_PATHS = [/(^|\/)\.claude\/settings(\.local)?\.json$/i, /(^|\/)\.husky\//i];
 
+function readSettings(cwd) {
+  const text = readText(path.join(cwd, SETTINGS_FILE));
+  if (text === undefined) return {};
+  try {
+    return JSON.parse(text) ?? {};
+  } catch (error) {
+    throw new Error(`${SETTINGS_FILE} is not valid JSON: ${error.message}`, { cause: error });
+  }
+}
+
+function toPattern(pattern) {
+  try {
+    return new RegExp(pattern, 'iu');
+  } catch (error) {
+    throw new Error(`${SETTINGS_FILE}: "${pattern}" in "protect" is not a valid regular expression`, { cause: error });
+  }
+}
+
+function userPatterns(protect = []) {
+  if (!Array.isArray(protect) || protect.some((pattern) => typeof pattern !== 'string')) {
+    throw new Error(`${SETTINGS_FILE}: "protect" must be a list of regular expressions written as strings`);
+  }
+  return protect.map(toPattern);
+}
+
 /**
  * Reads `.agent-guard.json` from the project root. `protect` adds regular expressions tested against
  * the file path relative to the project, `maxAttempts` sets how often one file may fail lint in a row.
+ * An invalid file throws, so the protect hook blocks instead of quietly dropping the user's patterns.
  */
 export function loadSettings(cwd) {
-  const user = readText(path.join(cwd, SETTINGS_FILE), { parse: true }) ?? {};
+  const user = readSettings(cwd);
   return {
     maxAttempts: Number.isInteger(user.maxAttempts) && user.maxAttempts > 0 ? user.maxAttempts : DEFAULT_MAX_ATTEMPTS,
-    protectedPaths: [...PROTECTED_PATHS, ...(user.protect ?? []).map((pattern) => new RegExp(pattern, 'iu'))],
+    protectedPaths: [...PROTECTED_PATHS, ...userPatterns(user.protect)],
   };
 }
 

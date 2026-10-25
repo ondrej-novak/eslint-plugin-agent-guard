@@ -184,6 +184,8 @@ Both are optional. `.agent-guard.json` in the project root adjusts them:
 
 `protect` adds regular expressions tested against the path relative to the project. All protected names and patterns are matched without regard to case, because on Windows and macOS `ESLint.config.js` is the same file as `eslint.config.js`.
 
+If `.agent-guard.json` is invalid, or a hook fails for any other reason, `protect` blocks the tool call and says why, and `lint` tells you the edit went unlinted. Claude Code lets a tool call through when its hook crashes, so a guard that crashed silently would be off.
+
 A matching instruction for the agent is in [`examples/.claude/rules/code-shape.md`](examples/.claude/rules/code-shape.md). The rules hold either way; the instruction saves the agent a few failed attempts.
 
 The hooks block the easy paths, not every path. Lint in CI is the real gate: run `eslint .` there and block the merge on errors.

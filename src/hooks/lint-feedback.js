@@ -100,6 +100,11 @@ function feedback({ projectPath, output, attempt, maxAttempts }) {
   return `Lint failed for ${projectPath} (attempt ${attempt} of ${maxAttempts}). Fix these errors without disable comments:\n${output}`;
 }
 
+/** A crash would only show as a hook error, so the user is told that the edit went unlinted. */
+export function lintFailure(error) {
+  return { systemMessage: `agent-guard: the lint hook failed (${error.message}), so this edit was not linted.` };
+}
+
 /** Lints the file a tool just wrote and hands any errors back to the agent. */
 export async function lintFeedbackHook(tool) {
   if (!FILE_TOOLS.has(tool.tool_name)) return undefined;
