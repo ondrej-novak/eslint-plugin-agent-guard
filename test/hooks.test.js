@@ -189,21 +189,28 @@ describe('lint feedback', () => {
 describe('lint feedback for an app in a subfolder', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'agent-guard-'));
   const app = path.join(root, 'mobile');
-  const linkedEslint = path.join(app, 'node_modules/eslint');
+  const linked = ['eslint', 'stylelint'].map((name) => ({ name, at: path.join(app, 'node_modules', name) }));
   const event = (filePath) => ({ cwd: root, session_id: randomUUID(), tool_name: 'Write', tool_input: { file_path: filePath } });
 
   beforeAll(() => {
     mkdirSync(path.join(app, 'src'), { recursive: true });
-    mkdirSync(path.dirname(linkedEslint));
-    symlinkSync(path.join(here, '../node_modules/eslint'), linkedEslint, 'junction');
+    mkdirSync(path.join(app, 'node_modules'));
+    linked.forEach(({ name, at }) => symlinkSync(path.join(here, '../node_modules', name), at, 'junction'));
     writeFileSync(path.join(app, 'package.json'), '{ "type": "module" }');
     const plugin = pathToFileURL(path.join(here, '../src/index.js')).href;
     writeFileSync(path.join(app, 'eslint.config.js'), `import agentGuard from '${plugin}';\nexport default [...agentGuard.configs.recommended];\n`);
   });
 
   afterAll(() => {
-    unlinkSync(linkedEslint);
+    linked.forEach(({ at }) => unlinkSync(at));
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('tells the user once per session when a linter cannot run, instead of failing on every edit', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
+    writeFileSync(path.join(app, 'src/a.css'), '.a { color: red; }\n');
+    const css = event('mobile/src/a.css');
+    expect((await lintFeedbackHook(css)).systemMessage).toMatch(/stylelint could not lint mobile\/src\/a\.css/);
+    expect(await lintFeedbackHook(css)).toBeUndefined();
   });
 
   it('lints with the ESLint and config of the package around the file when the project root has neither', async () => {
