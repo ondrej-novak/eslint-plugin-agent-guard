@@ -40,11 +40,20 @@ describe('protect', () => {
 
   it('blocks lint script changes in package.json but allows other changes', () => {
     expect(protectReason(edit('package.json', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
-    expect(protectReason(edit('PACKAGE.JSON', { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' }))).toMatch(/lint scripts/);
     expect(protectReason(edit('package.json', { old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' }))).toBeUndefined();
-    const write = (content) => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: 'package.json', content } });
+    const write = (content, filePath = 'package.json') => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: filePath, content } });
     expect(write('{ "name": "fixture-project", "scripts": { "lint": "eslint .", "build": "vite build" } }')).toBeUndefined();
     expect(write('{ "name": "fixture-project", "scripts": { "build": "tsc" } }')).toMatch(/lint scripts/);
+    expect(write('{ "scripts": { "lint": "echo ok" } }', 'PACKAGE.JSON')).toMatch(/lint scripts/);
+  });
+
+  it('judges a package.json edit by the lint setup it leaves behind, not by the word lint', () => {
+    expect(protectReason(edit('package.json', { old_string: '"private": true', new_string: '"private": true, "devDependencies": { "eslint": "^10.0.0" }' }))).toBeUndefined();
+    expect(protectReason(edit('package.json', { old_string: ' ."', new_string: ' . || true"' }))).toMatch(/lint scripts/);
+    const edits = [{ old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' }, { old_string: 'eslint .', new_string: 'eslint src' }];
+    expect(protectReason({ cwd, tool_name: 'MultiEdit', tool_input: { file_path: 'package.json', edits } })).toMatch(/lint scripts/);
+    const write = (content) => protectReason({ cwd, tool_name: 'Write', tool_input: { file_path: 'package.json', content } });
+    expect(write('{ "name": "fixture-project", "scripts": { "lint": "eslint .", "build": "tsc", "test": "eslint . && vitest" } }')).toMatch(/lint scripts/);
   });
 
   it('honours extra patterns from .agent-guard.json', () => {
@@ -64,12 +73,32 @@ describe('protect', () => {
     'rm ESLint.config.js',
     'git checkout -- eslint.config.js',
     'git commit -m wip --no-verify',
+    'git commit -nm wip',
+    'git commit --amend -n',
+    'git -c core.hooksPath=/dev/null commit -m wip',
+    'git config core.hooksPath .nohooks',
+    'git config --unset core.hooksPath',
+    'cd app && git commit -anm wip',
+    'git -C app commit -n',
     'npx eslint --no-config-lookup src',
   ])('blocks the command %s', (command) => expect(protectReason(bash(command))).toMatch(/not allowed/));
 
-  it.each(['cat eslint.config.js', 'cat eslint.config.js 2>/dev/null', 'npx eslint src', 'npm test > out.txt'])('allows the command %s', (command) =>
-    expect(protectReason(bash(command))).toBeUndefined(),
-  );
+  it.each([
+    'cat eslint.config.js',
+    'cat eslint.config.js 2>/dev/null',
+    'npx eslint src',
+    'npm test > out.txt',
+    'git commit --amend --no-edit',
+    'git commit -am wip',
+    'git push -n origin main',
+    'git config --get core.hooksPath',
+    'git config core.hooksPath',
+    'git commit -minitial',
+    'git commit -uno -m wip',
+    'git log --grep=commit -n 1',
+    'git commit -m "explain the -n flag"',
+    "git commit -q -F - <<'EOF'\nDocument -n in the README\nEOF",
+  ])('allows the command %s', (command) => expect(protectReason(bash(command))).toBeUndefined());
 
   describe('in PowerShell', () => {
     const powershell = (command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
@@ -85,6 +114,8 @@ describe('protect', () => {
       'remove-item .eslintrc.json',
       'del eslint.config.js',
       "Set-Content ESLINT.CONFIG.JS ''",
+      "Set-Content .claude\\settings.json '{}'",
+      'Remove-Item .husky\\pre-commit',
       "[IO.File]::WriteAllText('eslint.config.js', '')",
       "'{}' > .stylelintrc.json",
       '$env:HUSKY = 0; git commit -m wip',
@@ -94,6 +125,50 @@ describe('protect', () => {
     it.each(['Get-Content eslint.config.js', 'npx eslint src', 'Set-Content src/app.ts $code', 'npm test 2>$null'])('allows the command %s', (command) =>
       expect(protectReason(powershell(command))).toBeUndefined(),
     );
+  });
+
+  describe('when it cannot check a tool call', () => {
+    const settingsFile = path.join(cwd, '.agent-guard.json');
+    const runCli = (hook, input) => JSON.parse(execFileSync('node', [bin, hook], { input, encoding: 'utf8' }));
+    const withSettings = (text, check) => {
+      writeFileSync(settingsFile, text);
+      try {
+        check();
+      } finally {
+        rmSync(settingsFile);
+      }
+    };
+
+    it.each([
+      ['"protect" is not a list', '{ "protect": "^src/generated/" }'],
+      ['a pattern is not a valid regular expression', '{ "protect": ["["] }'],
+      ['the file is not valid JSON', '{ "protect": ['],
+    ])('denies edits and commands when %s in .agent-guard.json', (_, text) => withSettings(text, () => {
+      for (const event of [edit('src/a.ts'), bash('npm test')]) {
+        const { hookSpecificOutput } = runCli('protect', JSON.stringify(event));
+        expect(hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(hookSpecificOutput.permissionDecisionReason).toMatch(/\.agent-guard\.json[\s\S]*tell the user/);
+      }
+    }));
+
+    it('denies when .agent-guard.json exists but cannot be read', () => {
+      mkdirSync(settingsFile);
+      try {
+        const { hookSpecificOutput } = runCli('protect', JSON.stringify(edit('src/a.ts')));
+        expect(hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(hookSpecificOutput.permissionDecisionReason).toMatch(/\.agent-guard\.json could not be read/);
+      } finally {
+        rmSync(settingsFile, { recursive: true });
+      }
+    });
+
+    it('denies when the hook input is not valid JSON', () => {
+      expect(runCli('protect', '{').hookSpecificOutput.permissionDecision).toBe('deny');
+    });
+
+    it('tells the user when the lint hook fails', () => {
+      expect(runCli('lint', '{').systemMessage).toMatch(/lint hook failed/);
+    });
   });
 
   it('answers through the CLI in the Claude Code hook format', () => {
@@ -147,21 +222,28 @@ describe('lint feedback', () => {
 describe('lint feedback for an app in a subfolder', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'agent-guard-'));
   const app = path.join(root, 'mobile');
-  const linkedEslint = path.join(app, 'node_modules/eslint');
+  const linked = ['eslint', 'stylelint'].map((name) => ({ name, at: path.join(app, 'node_modules', name) }));
   const event = (filePath) => ({ cwd: root, session_id: randomUUID(), tool_name: 'Write', tool_input: { file_path: filePath } });
 
   beforeAll(() => {
     mkdirSync(path.join(app, 'src'), { recursive: true });
-    mkdirSync(path.dirname(linkedEslint));
-    symlinkSync(path.join(here, '../node_modules/eslint'), linkedEslint, 'junction');
+    mkdirSync(path.join(app, 'node_modules'));
+    linked.forEach(({ name, at }) => symlinkSync(path.join(here, '../node_modules', name), at, 'junction'));
     writeFileSync(path.join(app, 'package.json'), '{ "type": "module" }');
     const plugin = pathToFileURL(path.join(here, '../src/index.js')).href;
     writeFileSync(path.join(app, 'eslint.config.js'), `import agentGuard from '${plugin}';\nexport default [...agentGuard.configs.recommended];\n`);
   });
 
   afterAll(() => {
-    unlinkSync(linkedEslint);
+    linked.forEach(({ at }) => unlinkSync(at));
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('tells the user once per session when a linter cannot run, instead of failing on every edit', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
+    writeFileSync(path.join(app, 'src/a.css'), '.a { color: red; }\n');
+    const css = event('mobile/src/a.css');
+    expect((await lintFeedbackHook(css)).systemMessage).toMatch(/stylelint could not lint mobile\/src\/a\.css/);
+    expect(await lintFeedbackHook(css)).toBeUndefined();
   });
 
   it('lints with the ESLint and config of the package around the file when the project root has neither', async () => {

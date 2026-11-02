@@ -10,6 +10,14 @@ ruleTester.run('no-body-comments', rule, {
     '// module notes\nconst a = 1;',
     'class A {\n  /** Why this exists. */\n  run() { return 1; }\n}',
     { code: 'function f() {\n  // @ts-expect-error upstream types are wrong\n  return g();\n}', options: [{ allow: ['^@ts-expect-error '] }] },
+    'function f() { return /*#__PURE__*/ create(); }',
+    'function f() { return /* @__PURE__ */ create(); }',
+    'function setup() {\n  const make = /* #__NO_SIDE_EFFECTS__ */ () => build();\n  return make;\n}',
+    "function load() { return import(/* webpackChunkName: \"chart\" */ './chart.js'); }",
+    'function load(name) { return import(/* @vite-ignore */ name); }',
+    'function f() {\n  /* istanbul ignore next */\n  if (debug) log();\n}',
+    'function f() {\n  /* c8 ignore next */\n  if (debug) log();\n}',
+    'function f() {\n  // prettier-ignore\n  const identity = [1,0, 0,1];\n  return identity;\n}',
   ],
   invalid: [
     { code: 'function f() {\n  // download the file\n  return fetch(url);\n}', errors: [{ message, line: 2 }] },
@@ -17,5 +25,6 @@ ruleTester.run('no-body-comments', rule, {
     { code: 'class A { run() { /* narrate */ } }', errors: [{ message }] },
     { code: 'function f() {}\nconst g = function () { /* a */ return 1; };', errors: [{ message, line: 2 }] },
     { code: 'function f() { /* a */ }', options: [{ hint: 'See CONTRIBUTING.md.' }], errors: [{ message: `${message} See CONTRIBUTING.md.` }] },
+    { code: 'function f() {\n  // webpack inlines this\n  return load();\n}', errors: [{ message, line: 2 }] },
   ],
 });
