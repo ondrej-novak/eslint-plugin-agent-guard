@@ -1,20 +1,13 @@
 import path from 'node:path';
 import { skipsChecks } from './git-hooks.js';
-import { isProtected, loadSettings, parseJson, projectRoot, PROTECTED_IN_COMMAND, readText, toProjectPath } from './settings.js';
-import { commandName, DIALECTS, isTextCommand, parseShell } from './shell.js';
+import { isProtected, loadSettings, parseJson, projectRoot, readText, toProjectPath } from './settings.js';
+import { DIALECTS, isTextCommand, parseShell } from './shell.js';
+import { commandWrites, writesProtectedFile } from './shell-writes.js';
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
-const WRITING_COMMAND = /(\bsed\b[^|;&]*\s-i|\bperl\b[^|;&]*\s-i|(?<![0-9&])>(?!&)|\btee\b|\bmv\b|\bcp\b|\brm\b|\btruncate\b|\bln\b|writeFile|\bgit\s+(checkout|restore|apply|stash))/;
-/** PowerShell ignores case and writes files through its own cmdlets, their aliases and .NET's File class. */
-const POWERSHELL_WRITING_COMMAND =
-  /\b(?:Set-Content|Add-Content|Clear-Content|Out-File|Tee-Object|New-Item|Copy-Item|Move-Item|Rename-Item|Remove-Item|ni|cpi|copy|mi|move|rni|ren|ri|del|erase|rd|rmdir)\b|\[(?:System\.)?IO\.File\]::(?:Write|Append|Create|Delete|Move|Copy|Replace)/i;
 const LINT_KEY = /lint/i;
 
-const FILE_WRITERS = new Set(['mv', 'cp', 'rm', 'tee', 'truncate', 'ln', 'set-content', 'add-content', 'clear-content', 'out-file', 'tee-object', 'new-item', 'copy-item', 'move-item', 'rename-item', 'remove-item', 'ni', 'cpi', 'copy', 'mi', 'move', 'rni', 'ren', 'ri', 'del', 'erase', 'rd', 'rmdir', 'ac', 'clc']);
-const SCRIPTED_WRITE = /writeFile|\[(?:System\.)?IO\.File\]::(?:Write|Append|Create|Delete|Move|Copy|Replace)/i;
-const IN_PLACE_EDITORS = new Set(['sed', 'perl']);
-const IN_PLACE_FLAG = /^-[a-zA-Z]*i|^--in-place/;
 const PACKAGE_JSON = /(?<![\w.-])package\.json(?![\w.-])/i;
 const NPM_PKG_LINT_CHANGE = /\b(?:npm|pnpm|yarn)\s+pkg\s+(?:set|delete)\s.*lint/is;
 
@@ -80,12 +73,6 @@ function checkFileTool(tool, { cwd, root, settings }) {
   return undefined;
 }
 
-function commandWrites(words) {
-  if (isTextCommand(words)) return false;
-  if (IN_PLACE_EDITORS.has(commandName(words[0])) && words.some((word) => IN_PLACE_FLAG.test(word))) return true;
-  return words.some((word) => FILE_WRITERS.has(commandName(word)) || SCRIPTED_WRITE.test(word));
-}
-
 function writesPackageJson({ commands, targets }) {
   const namesPackageJson = (word) => PACKAGE_JSON.test(word);
   return targets.some(namesPackageJson) || (commands.flat().some(namesPackageJson) && commands.some(commandWrites));
@@ -96,8 +83,7 @@ function checkCommand({ tool_name: toolName, tool_input: input }) {
   const pipelines = parseShell(command, DIALECTS[toolName]);
   const commands = pipelines.flatMap((pipeline) => pipeline.commands);
   if (commands.some(skipsChecks)) return 'Skipping hooks or lint configuration on the command line is not allowed.';
-  const writes = WRITING_COMMAND.test(command) || POWERSHELL_WRITING_COMMAND.test(command);
-  if (PROTECTED_IN_COMMAND.test(command.replaceAll('\\', '/')) && writes) return 'This command would change a lint guardrail file, which is not allowed.';
+  if (writesProtectedFile(command, DIALECTS[toolName])) return 'This command would change a lint guardrail file, which is not allowed.';
   if (commands.some((words) => !isTextCommand(words) && NPM_PKG_LINT_CHANGE.test(words.join(' ')))) return 'Changing lint scripts or lint configuration in package.json is not allowed.';
   if (pipelines.some(writesPackageJson)) {
     return 'Changing package.json from the shell is not allowed, because the result cannot be checked for lint changes. Use the Edit tool: edits that leave the lint setup alone go through.';
