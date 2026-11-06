@@ -1,11 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lintFeedbackHook } from '../src/hooks/lint-feedback.js';
 import { protectReason } from '../src/hooks/protect.js';
 
@@ -19,8 +19,56 @@ const NPX_NEEDS_SHELL = process.platform === 'win32';
 /** The first import of stylelint can take over 10 s on a cold Windows machine. */
 const FIRST_IMPORT_TIMEOUT_MS = 30_000;
 
+/** The old regex took 10 s on a command this long; the budget only has to tell that from a linear read. */
+const BACKTRACKING_BUDGET_MS = 1000;
+
+const BOM = String.fromCharCode(0xfeff);
+
 const edit = (filePath, input = {}) => ({ cwd, tool_name: 'Edit', tool_input: { file_path: filePath, old_string: 'a', new_string: 'b', ...input } });
 const bash = (command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
+
+/** Claude Code sets this when it runs the suite, and it would move the settings file away from the fixture. */
+beforeEach(() => vi.stubEnv('CLAUDE_PROJECT_DIR', ''));
+afterEach(() => vi.unstubAllEnvs());
+
+describe('protect on a package.json as it is on disk', () => {
+  const lintScript = '{\n  "scripts": {\n    "lint": "eslint .",\n    "build": "tsc"\n  }\n}\n';
+  const crlf = lintScript.replaceAll('\n', '\r\n');
+  const disableLint = { old_string: '"lint": "eslint ."', new_string: '"lint": "echo ok"' };
+  const changeBuild = { old_string: '"build": "tsc"', new_string: '"build": "tsc -b"' };
+  const judge = (text, input) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'agent-guard-'));
+    writeFileSync(path.join(dir, 'package.json'), text);
+    try {
+      return protectReason({ cwd: dir, tool_name: 'Edit', tool_input: { file_path: 'package.json', ...input } });
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  };
+
+  it.each([
+    ['CRLF, with LF in a multi-line old_string', { text: crlf, input: { old_string: '"lint": "eslint .",\n    "build": "tsc"', new_string: '"lint": "echo ok",\n    "build": "tsc"' } }],
+    ['curly quotes in old_string', { text: lintScript, input: { old_string: '“lint”: “eslint .”', new_string: '"lint": "echo ok"' } }],
+    ['a BOM', { text: `${BOM}${lintScript}`, input: disableLint }],
+    ['an old_string that matches nothing but mentions lint', { text: lintScript, input: { old_string: '"lint":  "eslint ."', new_string: '"lint": "echo ok"' } }],
+    ['invalid JSON before and after, and an edit that mentions lint', { text: '{ "scripts": { "lint": "eslint ." ', input: disableLint }],
+  ])('blocks a lint script change in a file with %s', (_, { text, input }) => expect(judge(text, input)).toMatch(/lint scripts/));
+
+  it.each([
+    ['CRLF', { text: crlf, input: changeBuild }],
+    ['a BOM', { text: `${BOM}${lintScript}`, input: changeBuild }],
+    ['curly quotes in a value', { text: '{ "description": "the “best” tool", "scripts": { "lint": "eslint ." } }', input: { old_string: '"description"', new_string: '"summary"' } }],
+    ['invalid JSON before and after, and an unrelated edit', { text: '{ "name": "a", ', input: { old_string: '"a"', new_string: '"b"' } }],
+  ])('allows an unrelated edit in a file with %s', (_, { text, input }) => expect(judge(text, input)).toBeUndefined());
+});
+
+describe('the CLI', () => {
+  it.each(['protct', 'constructor'])('exits with the blocking code on the unknown hook %s', (name) => {
+    const run = spawnSync('node', [bin, name], { input: '{}', encoding: 'utf8' });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(/Usage: agent-guard/);
+  });
+});
 
 describe('protect', () => {
   it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json'])(
@@ -81,7 +129,56 @@ describe('protect', () => {
     'cd app && git commit -anm wip',
     'git -C app commit -n',
     'npx eslint --no-config-lookup src',
+    'git commit -m wip \\\n  -n',
+    'git \\\n  commit -n -m wip',
+    'git commit -m "a; b" -n',
+    'git commit -m "a && b" -n',
+    "git commit -m \"$(cat <<'EOF'\nit's a message; with \"quotes\"\nEOF\n)\" -n",
+    'git commit -m $(date) -n',
+    'git commit -m wip >/dev/null -n',
+    'git commit -m wip > out.txt -n',
+    'git commit -F - <<EOF -n\nmessage\nEOF',
+    'git commit "-n" -m wip',
+    "git commit '-n' -m wip",
+    'git commit -m wip \\-n',
+    'git.exe commit -n -m wip',
+    'Git commit -n -m wip',
+    '"git" commit -n -m wip',
+    'git --work-tree . commit -n',
+    'git --git-dir .git commit -n',
+    'git commit --no-verif -m wip',
+    "HUSKY='0' git commit -m wip",
+    'HUSKY="0" git commit -m wip',
+    'x=$(git commit -n -m wip)',
+    'sudo git commit -n',
+    'bash -c "git commit -n -m wip"',
+    'echo "git commit -n" | sh',
+    "sh <<'EOF'\ngit commit -n\nEOF",
+    "# don't skip the hooks\ngit commit -n",
+    'flags=--no-verify; git commit $flags',
+    'rm -rf .husky',
+    'mv .husky .husky-off',
+    'rm -rf .claude',
+    'mv .claude/ .claude-off',
+    'rm -rf node_modules/eslint-plugin-agent-guard',
+    'npm pkg set scripts.lint="exit 0"',
+    'npm pkg delete scripts.lint',
+    "sed -i 's/eslint \\./true/' package.json",
+    'echo "{}" > package.json',
+    'echo "{}" >> mobile/package.json',
+    'jq . package.json > tmp && mv tmp package.json',
+    "node -e \"require('fs').writeFileSync('package.json', '{}')\"",
   ])('blocks the command %s', (command) => expect(protectReason(bash(command))).toMatch(/not allowed/));
+
+  it('sends the agent to the Edit tool for a package.json it cannot judge', () => {
+    expect(protectReason(bash('echo "{}" > package.json'))).toMatch(/Use the Edit tool/);
+  });
+
+  it('reads a long run of git options without backtracking', () => {
+    const start = Date.now();
+    expect(protectReason(bash(`git ${'-c '.repeat(40)}status`))).toBeUndefined();
+    expect(Date.now() - start).toBeLessThan(BACKTRACKING_BUDGET_MS);
+  });
 
   it.each([
     'cat eslint.config.js',
@@ -98,6 +195,26 @@ describe('protect', () => {
     'git log --grep=commit -n 1',
     'git commit -m "explain the -n flag"',
     "git commit -q -F - <<'EOF'\nDocument -n in the README\nEOF",
+    'git config core.hooksPath 2>/dev/null',
+    'git config --get core.hooksPath 2>&1',
+    'git commit -m "Block core.hooksPath=x in hooks"',
+    'echo "git commit -n"',
+    'gh pr create --body "use git commit -n to skip"',
+    'git commit -m "docs: explain --no-verify"',
+    'git commit -m "--no-verify"',
+    "git commit -m \"$(cat <<'EOF'\nDocument git commit -n; it's --no-verify\nEOF\n)\"",
+    'git commit-graph write -n',
+    'git commit --message -n',
+    'git commit -m wip # -n',
+    'grep -rn -- --no-verify README.md',
+    'rm -rf .claude/worktrees/old',
+    'ls .husky',
+    'cat package.json',
+    'cat package.json > /tmp/copy.json',
+    'sed -n 1p package.json',
+    'npm pkg set version=1.2.3',
+    'npm install -D vitest',
+    'git checkout -- package.json',
   ])('allows the command %s', (command) => expect(protectReason(bash(command))).toBeUndefined());
 
   describe('in PowerShell', () => {
@@ -119,12 +236,23 @@ describe('protect', () => {
       "[IO.File]::WriteAllText('eslint.config.js', '')",
       "'{}' > .stylelintrc.json",
       '$env:HUSKY = 0; git commit -m wip',
+      "$env:HUSKY='0'; git commit -m wip",
       'git commit -m wip --no-verify',
+      'git commit -m wip `\n  -n',
+      'Remove-Item "C:\\repo\\"; git commit -n',
+      'Remove-Item -Recurse -Force .husky',
+      'Remove-Item -Recurse .claude',
+      "Set-Content package.json '{}'",
     ])('blocks the command %s', (command) => expect(protectReason(powershell(command))).toMatch(/not allowed/));
 
-    it.each(['Get-Content eslint.config.js', 'npx eslint src', 'Set-Content src/app.ts $code', 'npm test 2>$null'])('allows the command %s', (command) =>
-      expect(protectReason(powershell(command))).toBeUndefined(),
-    );
+    it.each([
+      'Get-Content eslint.config.js',
+      'npx eslint src',
+      'Set-Content src/app.ts $code',
+      'npm test 2>$null',
+      'Get-Content package.json',
+      "git commit -m @'\nit's about --no-verify; and -n\n'@",
+    ])('allows the command %s', (command) => expect(protectReason(powershell(command))).toBeUndefined());
   });
 
   describe('when it cannot check a tool call', () => {
@@ -143,6 +271,8 @@ describe('protect', () => {
       ['"protect" is not a list', '{ "protect": "^src/generated/" }'],
       ['a pattern is not a valid regular expression', '{ "protect": ["["] }'],
       ['the file is not valid JSON', '{ "protect": ['],
+      ['the file holds a list instead of an object', '["^src/generated/"]'],
+      ['the file holds null', 'null'],
     ])('denies edits and commands when %s in .agent-guard.json', (_, text) => withSettings(text, () => {
       for (const event of [edit('src/a.ts'), bash('npm test')]) {
         const { hookSpecificOutput } = runCli('protect', JSON.stringify(event));
@@ -162,8 +292,19 @@ describe('protect', () => {
       }
     });
 
-    it('denies when the hook input is not valid JSON', () => {
+    it('accepts a settings file saved with a BOM', () => withSettings(`${BOM}{ "protect": ["^src/generated/"] }`, () => {
+      expect(protectReason(edit('src/generated/api.ts'))).toMatch(/not allowed/);
+      expect(protectReason(edit('src/a.ts'))).toBeUndefined();
+    }));
+
+    it('keeps the settings of the project root after the session moved to a subfolder', () => withSettings('{ "protect": ["^src/generated/"] }', () => {
+      vi.stubEnv('CLAUDE_PROJECT_DIR', cwd);
+      expect(protectReason({ ...edit('generated/api.ts'), cwd: path.join(cwd, 'src') })).toMatch(/src\/generated\/api\.ts is not allowed/);
+    }));
+
+    it('denies when the hook input is empty or not valid JSON', () => {
       expect(runCli('protect', '{').hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(runCli('protect', '').hookSpecificOutput.permissionDecision).toBe('deny');
     });
 
     it('tells the user when the lint hook fails', () => {
@@ -204,6 +345,21 @@ describe('lint feedback', () => {
     await lintFeedbackHook(write('bad.js', bad));
     const third = await lintFeedbackHook(write('bad.js', bad));
     expect(third.reason).toMatch(/^STOP\. src\/bad\.js has failed lint 3 times/);
+  });
+
+  it('still feeds errors back when .agent-guard.json is invalid, and tells the user once', async () => {
+    const settingsFile = path.join(cwd, '.agent-guard.json');
+    writeFileSync(settingsFile, '{ not json');
+    try {
+      const event = { ...write('unsettled.js', 'export const wait = (run) => setTimeout(run, 10000);\n'), session_id: randomUUID() };
+      const first = await lintFeedbackHook(event);
+      expect(first.decision).toBe('block');
+      expect(first.reason).toMatch(/attempt 1 of 3[\s\S]*No magic number: 10000/);
+      expect(first.systemMessage).toMatch(/\.agent-guard\.json is not valid JSON/);
+      expect((await lintFeedbackHook(event)).systemMessage).toBeUndefined();
+    } finally {
+      rmSync(settingsFile);
+    }
   });
 
   it('resets the count once the file passes', async () => {
