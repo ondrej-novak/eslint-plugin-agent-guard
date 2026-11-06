@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { skipsGitHooks } from './git-hooks.js';
-import { isProtected, loadSettings, PROTECTED_IN_COMMAND, readText, toProjectPath } from './settings.js';
+import { skipsChecks } from './git-hooks.js';
+import { isProtected, loadSettings, parseJson, projectRoot, PROTECTED_IN_COMMAND, readText, toProjectPath } from './settings.js';
+import { commandName, DIALECTS, isTextCommand, parseShell } from './shell.js';
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
@@ -8,16 +9,28 @@ const WRITING_COMMAND = /(\bsed\b[^|;&]*\s-i|\bperl\b[^|;&]*\s-i|(?<![0-9&])>(?!
 /** PowerShell ignores case and writes files through its own cmdlets, their aliases and .NET's File class. */
 const POWERSHELL_WRITING_COMMAND =
   /\b(?:Set-Content|Add-Content|Clear-Content|Out-File|Tee-Object|New-Item|Copy-Item|Move-Item|Rename-Item|Remove-Item|ni|cpi|copy|mi|move|rni|ren|ri|del|erase|rd|rmdir)\b|\[(?:System\.)?IO\.File\]::(?:Write|Append|Create|Delete|Move|Copy|Replace)/i;
-const SKIPPED_CHECKS = /--no-verify\b|\bHUSKY=0\b|\$env:HUSKY\s*=\s*['"]?0\b|--no-config-lookup\b/i;
 const LINT_KEY = /lint/i;
+
+const FILE_WRITERS = new Set(['mv', 'cp', 'rm', 'tee', 'truncate', 'ln', 'set-content', 'add-content', 'clear-content', 'out-file', 'tee-object', 'new-item', 'copy-item', 'move-item', 'rename-item', 'remove-item', 'ni', 'cpi', 'copy', 'mi', 'move', 'rni', 'ren', 'ri', 'del', 'erase', 'rd', 'rmdir', 'ac', 'clc']);
+const SCRIPTED_WRITE = /writeFile|\[(?:System\.)?IO\.File\]::(?:Write|Append|Create|Delete|Move|Copy|Replace)/i;
+const IN_PLACE_EDITORS = new Set(['sed', 'perl']);
+const IN_PLACE_FLAG = /^-[a-zA-Z]*i|^--in-place/;
+const PACKAGE_JSON = /(?<![\w.-])package\.json(?![\w.-])/i;
+const NPM_PKG_LINT_CHANGE = /\b(?:npm|pnpm|yarn)\s+pkg\s+(?:set|delete)\s.*lint/is;
 
 export const REASON_SUFFIX =
   'If a lint rule makes the task impossible, stop and tell the user which rule blocks you and why. The user decides whether the rule changes.';
 
+const foldLineEndings = (text) => text.replaceAll('\r\n', '\n');
+const foldQuotes = (text) => text.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+
+/** Claude Code's Edit matches across line endings and curly quotes, so an edit has to be judged the same way. */
+const foldForMatch = (text) => foldQuotes(foldLineEndings(text));
+
 /** The lint-related parts of a package.json: scripts whose name or command mentions lint, and inline lint configs. */
 function lintParts(text) {
   try {
-    const json = JSON.parse(text);
+    const json = parseJson(text);
     const scripts = Object.entries(json.scripts ?? {}).filter((script) => script.some((part) => LINT_KEY.test(String(part))));
     return JSON.stringify([scripts, json.eslintConfig, json.stylelint, json['lint-staged']]);
   } catch {
@@ -25,45 +38,80 @@ function lintParts(text) {
   }
 }
 
-/** Applies one Edit the way Claude Code does; an old_string that is not in the file leaves it unchanged, as the Edit would fail. */
+/** Finds the text with quotes folded but splices the original, because folding a curly quote in a value would break the JSON. */
 function applyEdit(text, { old_string: oldText = '', new_string: newText = '', replace_all: all = false }) {
-  if (!oldText || !text.includes(oldText)) return text;
-  return all ? text.split(oldText).join(newText) : text.replace(oldText, () => newText);
+  const from = foldForMatch(oldText);
+  const folded = foldQuotes(text);
+  let at = from ? folded.indexOf(from) : -1;
+  let result = '';
+  let copied = 0;
+  while (at >= 0) {
+    result += text.slice(copied, at) + newText;
+    copied = at + from.length;
+    at = all ? folded.indexOf(from, copied) : -1;
+  }
+  return result + text.slice(copied);
 }
 
-/** Compares the lint setup before and after the tool call, so unrelated edits pass and disguised ones do not. */
+const mentionsLint = ({ old_string: oldText = '', new_string: newText = '', content = '' }) => LINT_KEY.test(`${oldText}${newText}${content}`);
+
+/** Compares the lint setup before and after the tool call. Where that comparison can't be made, the word lint decides. */
 function touchesLintInPackageJson(tool, filePath) {
   const input = tool.tool_input ?? {};
-  const before = readText(filePath) ?? '{}';
-  const after = tool.tool_name === 'Write' ? (input.content ?? '') : (input.edits ?? [input]).reduce(applyEdit, before);
-  return lintParts(before) !== lintParts(after);
+  const before = foldLineEndings(readText(filePath) ?? '{}');
+  const edits = input.edits ?? [input];
+  const isUnmatched = ({ old_string: oldText = '' }) => !foldQuotes(before).includes(foldForMatch(oldText));
+  if (edits.some((edit) => isUnmatched(edit) && mentionsLint(edit))) return true;
+  const after = tool.tool_name === 'Write' ? (input.content ?? '') : edits.reduce(applyEdit, before);
+  const [was, now] = [lintParts(before), lintParts(after)];
+  return was === undefined && now === undefined ? edits.some(mentionsLint) : was !== now;
 }
 
-function checkFileTool(tool, { cwd, settings }) {
+function checkFileTool(tool, { cwd, root, settings }) {
   const input = tool.tool_input ?? {};
   const filePath = input.file_path ?? input.notebook_path;
   if (!filePath) return undefined;
-  const projectPath = toProjectPath(filePath, cwd);
+  const absolute = path.resolve(cwd, filePath);
+  const projectPath = toProjectPath(absolute, root);
   if (isProtected(projectPath, settings)) return `Editing ${projectPath} is not allowed: it configures the lint guardrails.`;
-  if (path.basename(projectPath).toLowerCase() === 'package.json' && touchesLintInPackageJson(tool, path.resolve(cwd, filePath))) {
+  if (path.basename(projectPath).toLowerCase() === 'package.json' && touchesLintInPackageJson(tool, absolute)) {
     return `Changing lint scripts or lint configuration in ${projectPath} is not allowed.`;
   }
   return undefined;
 }
 
-function checkCommand(command) {
-  if (SKIPPED_CHECKS.test(command) || skipsGitHooks(command)) return 'Skipping hooks or lint configuration on the command line is not allowed.';
+function commandWrites(words) {
+  if (isTextCommand(words)) return false;
+  if (IN_PLACE_EDITORS.has(commandName(words[0])) && words.some((word) => IN_PLACE_FLAG.test(word))) return true;
+  return words.some((word) => FILE_WRITERS.has(commandName(word)) || SCRIPTED_WRITE.test(word));
+}
+
+function writesPackageJson({ commands, targets }) {
+  const namesPackageJson = (word) => PACKAGE_JSON.test(word);
+  return targets.some(namesPackageJson) || (commands.flat().some(namesPackageJson) && commands.some(commandWrites));
+}
+
+function checkCommand({ tool_name: toolName, tool_input: input }) {
+  const command = input?.command ?? '';
+  const pipelines = parseShell(command, DIALECTS[toolName]);
+  const commands = pipelines.flatMap((pipeline) => pipeline.commands);
+  if (commands.some(skipsChecks)) return 'Skipping hooks or lint configuration on the command line is not allowed.';
   const writes = WRITING_COMMAND.test(command) || POWERSHELL_WRITING_COMMAND.test(command);
   if (PROTECTED_IN_COMMAND.test(command.replaceAll('\\', '/')) && writes) return 'This command would change a lint guardrail file, which is not allowed.';
+  if (commands.some((words) => !isTextCommand(words) && NPM_PKG_LINT_CHANGE.test(words.join(' ')))) return 'Changing lint scripts or lint configuration in package.json is not allowed.';
+  if (pipelines.some(writesPackageJson)) {
+    return 'Changing package.json from the shell is not allowed, because the result cannot be checked for lint changes. Use the Edit tool: edits that leave the lint setup alone go through.';
+  }
   return undefined;
 }
 
 /** Returns why a tool call must not run, or undefined when it may. */
 export function protectReason(tool) {
   const cwd = tool.cwd ?? process.cwd();
-  const settings = loadSettings(cwd);
-  if (FILE_TOOLS.has(tool.tool_name)) return checkFileTool(tool, { cwd, settings });
-  if (SHELL_TOOLS.has(tool.tool_name)) return checkCommand(tool.tool_input?.command ?? '');
+  const root = projectRoot(tool);
+  const settings = loadSettings(root);
+  if (FILE_TOOLS.has(tool.tool_name)) return checkFileTool(tool, { cwd, root, settings });
+  if (SHELL_TOOLS.has(tool.tool_name)) return checkCommand(tool);
   return undefined;
 }
 

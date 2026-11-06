@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadSettings, readText, toProjectPath } from './settings.js';
+import { DEFAULT_MAX_ATTEMPTS, loadSettings, projectRoot, readText, toProjectPath } from './settings.js';
 import { REASON_SUFFIX } from './protect.js';
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
@@ -134,7 +134,17 @@ export async function lintFeedbackHook(tool) {
     return noticeOnce({ sessionId, topic: `${linter.specifier}-error`, message });
   }
   const attempt = recordAttempt({ sessionId, file: projectPath, failed: Boolean(output) });
-  if (!output) return undefined;
-  const { maxAttempts } = loadSettings(cwd);
-  return { decision: 'block', reason: feedback({ projectPath, output, attempt, maxAttempts }) };
+  const { maxAttempts, notice } = lintSettings({ root: projectRoot(tool), sessionId });
+  if (!output) return notice;
+  return { decision: 'block', reason: feedback({ projectPath, output, attempt, maxAttempts }), ...notice };
+}
+
+/** Invalid settings must not cost the agent its lint errors: the default limit applies and the user is told once. */
+function lintSettings({ root, sessionId }) {
+  try {
+    return { maxAttempts: loadSettings(root).maxAttempts };
+  } catch (error) {
+    const message = `${error.message}. Lint errors still reach the agent, with the default limit of ${DEFAULT_MAX_ATTEMPTS} attempts. Fix the file.`;
+    return { maxAttempts: DEFAULT_MAX_ATTEMPTS, notice: noticeOnce({ sessionId, topic: 'settings-error', message }) };
+  }
 }
