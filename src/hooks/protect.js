@@ -16,7 +16,9 @@ const SCRIPTED_WRITE = /writeFile|\[(?:System\.)?IO\.File\]::(?:Write|Append|Cre
 const IN_PLACE_EDITORS = new Set(['sed', 'perl']);
 const IN_PLACE_FLAG = /^-[a-zA-Z]*i|^--in-place/;
 const PACKAGE_JSON = /(?<![\w.-])package\.json(?![\w.-])/i;
-const NPM_PKG_LINT_CHANGE = /\b(?:npm|pnpm|yarn)\s+pkg\s+(?:set|delete)\s.*lint/is;
+
+/** Global options can stand before `pkg`, as in `npm --prefix mobile pkg set`, the usual form for an app in a subfolder. */
+const NPM_PKG_LINT_CHANGE = /\b(?:npm|pnpm|yarn)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+pkg\s+(?:set|delete)\s.*lint/is;
 
 export const REASON_SUFFIX =
   'If a lint rule makes the task impossible, stop and tell the user which rule blocks you and why. The user decides whether the rule changes.';

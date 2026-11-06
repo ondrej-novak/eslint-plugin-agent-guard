@@ -163,6 +163,11 @@ describe('protect', () => {
     'rm -rf node_modules/eslint-plugin-agent-guard',
     'npm pkg set scripts.lint="exit 0"',
     'npm pkg delete scripts.lint',
+    'npm --prefix mobile pkg set scripts.lint="exit 0"',
+    'npm --prefix=mobile pkg delete scripts.lint',
+    'npm --silent --prefix mobile pkg set scripts.lint=true',
+    'pnpm --dir mobile pkg set scripts.lint=true',
+    'yarn --cwd mobile pkg set scripts.lint=true',
     "sed -i 's/eslint \\./true/' package.json",
     'echo "{}" > package.json',
     'echo "{}" >> mobile/package.json',
@@ -177,6 +182,12 @@ describe('protect', () => {
   it('reads a long run of git options without backtracking', () => {
     const start = Date.now();
     expect(protectReason(bash(`git ${'-c '.repeat(40)}status`))).toBeUndefined();
+    expect(Date.now() - start).toBeLessThan(BACKTRACKING_BUDGET_MS);
+  });
+
+  it('reads a long run of npm options without backtracking', () => {
+    const start = Date.now();
+    expect(protectReason(bash(`npm ${'--prefix mobile '.repeat(40)}pkg get lint-staged`))).toBeUndefined();
     expect(Date.now() - start).toBeLessThan(BACKTRACKING_BUDGET_MS);
   });
 
@@ -213,6 +224,9 @@ describe('protect', () => {
     'cat package.json > /tmp/copy.json',
     'sed -n 1p package.json',
     'npm pkg set version=1.2.3',
+    'npm --prefix mobile pkg set version=1.2.3',
+    'npm --prefix mobile run lint',
+    'npm run pkg set lint',
     'npm install -D vitest',
     'git checkout -- package.json',
   ])('allows the command %s', (command) => expect(protectReason(bash(command))).toBeUndefined());
