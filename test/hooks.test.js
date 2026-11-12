@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -13,10 +14,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(here, 'fixtures/project');
 const bin = path.join(here, '../bin/agent-guard.mjs');
 
-/** On Windows npx is a .cmd script, which Node only starts through a shell. */
-const NPX_NEEDS_SHELL = process.platform === 'win32';
+/** Started with this Node rather than npx, which on Windows needs a shell and adds a second to every run. */
+const eslintBin = path.join(path.dirname(createRequire(import.meta.url).resolve('eslint/package.json')), 'bin/eslint.js');
 
-/** The first import of stylelint can take over 10 s on a cold Windows machine. */
+/** A first import of stylelint, or of ESLint in a new process, can take over 10 s on a cold Windows machine. */
 const FIRST_IMPORT_TIMEOUT_MS = 30_000;
 
 /** The old regex took 10 s on a command this long; the budget only has to tell that from a linear read. */
@@ -445,9 +446,9 @@ describe.runIf(apiAppliesSuppressions())('lint feedback with bulk suppressions',
 
   afterEach(() => [file, suppressions].forEach((target) => rmSync(target, { force: true })));
 
-  it('does not report violations recorded in eslint-suppressions.json', async () => {
+  it('does not report violations recorded in eslint-suppressions.json', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     writeFileSync(file, 'export const wait = (run) => setTimeout(run, 10000);\n');
-    execFileSync('npx', ['eslint', '--suppress-all', 'src/legacy.js'], { cwd, stdio: 'ignore', shell: NPX_NEEDS_SHELL });
+    execFileSync(process.execPath, [eslintBin, '--suppress-all', 'src/legacy.js'], { cwd, stdio: 'ignore' });
     const event = { cwd, session_id: randomUUID(), tool_name: 'Edit', tool_input: { file_path: file } };
     expect(await lintFeedbackHook(event)).toBeUndefined();
     writeFileSync(file, 'export const wait = (run) => setTimeout(run, 10000);\nexport const later = (run) => setTimeout(run, 20000);\n');
