@@ -204,7 +204,7 @@ npm test
 npm run lint
 ```
 
-To release, bump `version` in `package.json`, merge, then publish a GitHub release tagged `v<version>`. The [release workflow](.github/workflows/release.yml) checks the tag against `package.json`, runs lint and tests, and publishes to npm with provenance. It needs an `NPM_TOKEN` repository secret.
+To release, bump `version` in `package.json`, merge, then publish a GitHub release tagged `v<version>`. The [release workflow](.github/workflows/release.yml) checks the tag against `package.json`, runs lint and tests, and publishes to npm with provenance through [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored. The package's trusted publisher on npmjs.com names this repository and `release.yml`, with `npm publish` allowed.
 
 ## License
 
