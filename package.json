@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-agent-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ESLint rules, presets and Claude Code hooks that keep AI-written code small, named and readable.",
   "homepage": "https://github.com/ondrej-novak/eslint-plugin-agent-guard#readme",
   "bugs": "https://github.com/ondrej-novak/eslint-plugin-agent-guard/issues",
