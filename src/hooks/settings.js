@@ -29,6 +29,8 @@ const PROTECTED_NAMES = [
   /^stylelint\.config\.[cm]?[jt]s$/i,
   /^\.stylelintrc(\.\w+)?$/i,
   /^\.stylelintignore$/i,
+  /^\.oxlintrc(\.jsonc?)?$/i,
+  /^oxlint\.config\.[cm]?[jt]s$/i,
   /^\.agent-guard\.json$/i,
 ];
 
@@ -115,4 +117,4 @@ export function isProtected(projectPath, settings) {
  * the `.husky`, `.claude`, `.cursor` and `.codex` folders, and this package, without which the hooks stop running at all.
  */
 export const PROTECTED_IN_COMMAND =
-  /eslint\.config\.|\.eslintrc|\.eslintignore|eslint-suppressions\.json|stylelint\.config\.|\.stylelintrc|\.stylelintignore|\.agent-guard\.json|\.claude(?:\/settings|\/?(?![\w./-]))|\.cursor(?:\/hooks\.json|\/?(?![\w./-]))|\.codex(?:\/hooks\.json|\/config\.toml|\/?(?![\w./-]))|\.husky(?![\w.-])|node_modules\/eslint-plugin-agent-guard(?![\w.-])/i;
+  /eslint\.config\.|\.eslintrc|\.eslintignore|eslint-suppressions\.json|stylelint\.config\.|\.stylelintrc|\.stylelintignore|\.oxlintrc|oxlint\.config\.|\.agent-guard\.json|\.claude(?:\/settings|\/?(?![\w./-]))|\.cursor(?:\/hooks\.json|\/?(?![\w./-]))|\.codex(?:\/hooks\.json|\/config\.toml|\/?(?![\w./-]))|\.husky(?![\w.-])|node_modules\/eslint-plugin-agent-guard(?![\w.-])/i;

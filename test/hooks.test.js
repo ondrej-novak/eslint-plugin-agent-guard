@@ -73,7 +73,7 @@ describe('the CLI', () => {
 });
 
 describe('protect', () => {
-  it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json', '.cursor/hooks.json', '.codex/hooks.json', '.codex/config.toml'])(
+  it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json', '.cursor/hooks.json', '.codex/hooks.json', '.codex/config.toml', '.oxlintrc.json', 'oxlint.config.ts'])(
     'blocks edits to %s',
     (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
   );
@@ -166,6 +166,7 @@ describe('protect', () => {
     'rm -rf .codex',
     'rm .cursor/hooks.json',
     "echo '[features]' >> .codex/config.toml",
+    "echo '{}' > .oxlintrc.json",
     'npm pkg set scripts.lint="exit 0"',
     'npm pkg delete scripts.lint',
     'npm --prefix mobile pkg set scripts.lint="exit 0"',

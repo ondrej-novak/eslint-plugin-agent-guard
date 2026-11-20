@@ -14,6 +14,8 @@ The five limits come from Alex Brohshtut's [ESLint as AI Guardrails](https://med
 - **Closing the obvious escapes.** Disable comments have no effect, `const TEN_THOUSAND = 10000` is rejected, and the hooks stop the agent from editing the lint setup.
 - **A feedback loop.** Every edited file is linted at once, and after three failures on the same file the agent is told to stop and ask.
 
+[eslint-plugin-human-first](https://github.com/olistic/eslint-plugin-human-first) ships the article's rules as written and bans JSDoc with every other comment. This package keeps JSDoc, because why the code exists is the one thing the code cannot say, and adds the hooks, because an agent can edit an ESLint config as easily as any other file.
+
 It is the TypeScript sibling of [stylelint-plugin-design-system-guard](https://github.com/ondrej-novak/stylelint-plugin-design-system-guard).
 
 ## Install
@@ -171,7 +173,7 @@ The package ships a small CLI for two hooks, `protect` and `lint`. They run in C
 
 The paths assume the package is installed in the project root. For an app in a subfolder, point them at its `node_modules`, for example `$CLAUDE_PROJECT_DIR/mobile/node_modules/eslint-plugin-agent-guard/bin/agent-guard.mjs`.
 
-**`protect`** blocks edits to the lint setup: `eslint.config.*`, `.eslintrc*`, `.eslintignore`, `eslint-suppressions.json`, the same files for Stylelint, `.agent-guard.json`, `.claude/settings*.json`, `.husky/`, and the agent hook files `.cursor/hooks.json`, `.codex/hooks.json` and `.codex/config.toml`. It also blocks changes to lint scripts (any script whose name or command mentions lint) and inline lint configs in `package.json`, while other `package.json` edits such as adding a dependency go through, Bash and PowerShell commands that write to those files (with `/` or `\` in the path) or remove `.husky`, `.claude`, `.cursor`, `.codex` or this package, and skipping git hooks with `--no-verify`, `git commit -n`, a changed `core.hooksPath` or `HUSKY=0`. Those flags are read the way the shell reads them, so a commit message or PR body that mentions `--no-verify` goes through. `npm pkg set` on a lint script is blocked, and so is any other shell command that writes to `package.json`, because its result cannot be judged: that message sends the agent to the Edit tool. `git checkout -- package.json` and `npm install` still work. A shell command is judged pipeline by pipeline and redirects, `tee` and `cp` by their target, so `rm a.ts; cat eslint.config.js` and `cp eslint.config.js /tmp/old.js` pass. When a variable, `xargs`, an alias, a function, a started shell or a changed directory could carry the path from one pipeline to a write in another, any write in a command that names one of those files is blocked. The message tells the agent it may stop and explain why a rule makes the task impossible. A person then decides.
+**`protect`** blocks edits to the lint setup: `eslint.config.*`, `.eslintrc*`, `.eslintignore`, `eslint-suppressions.json`, the same files for Stylelint, `.oxlintrc.json` and `oxlint.config.*`, `.agent-guard.json`, `.claude/settings*.json`, `.husky/`, and the agent hook files `.cursor/hooks.json`, `.codex/hooks.json` and `.codex/config.toml`. It also blocks changes to lint scripts (any script whose name or command mentions lint) and inline lint configs in `package.json`, while other `package.json` edits such as adding a dependency go through, Bash and PowerShell commands that write to those files (with `/` or `\` in the path) or remove `.husky`, `.claude`, `.cursor`, `.codex` or this package, and skipping git hooks with `--no-verify`, `git commit -n`, a changed `core.hooksPath` or `HUSKY=0`. Those flags are read the way the shell reads them, so a commit message or PR body that mentions `--no-verify` goes through. `npm pkg set` on a lint script is blocked, and so is any other shell command that writes to `package.json`, because its result cannot be judged: that message sends the agent to the Edit tool. `git checkout -- package.json` and `npm install` still work. A shell command is judged pipeline by pipeline and redirects, `tee` and `cp` by their target, so `rm a.ts; cat eslint.config.js` and `cp eslint.config.js /tmp/old.js` pass. When a variable, `xargs`, an alias, a function, a started shell or a changed directory could carry the path from one pipeline to a write in another, any write in a command that names one of those files is blocked. The message tells the agent it may stop and explain why a rule makes the task impossible. A person then decides.
 
 **`lint`** runs after every edit. JavaScript and TypeScript files go through the project's ESLint, stylesheets through its Stylelint when installed. Both are loaded from the project root, or, when the root has none, from the nearest folder above the edited file that has a `package.json`, so an app in `mobile/` is linted with its own ESLint and config. Errors go straight back to the agent. Failures are counted per file, so passing on one file does not reset another. After three failures in a row the agent is told to stop and report. If no ESLint is found at all, or a linter cannot run, for example Stylelint without a config, Claude Code shows you a notice once per session instead of the hook quietly doing nothing.
 
@@ -222,6 +224,41 @@ Codex runs a new or changed hook only after you trust it in `/hooks`. On Windows
 ## Existing codebases
 
 On an existing app the size rules will report hundreds of errors on day one. Use ESLint's [bulk suppressions](https://eslint.org/docs/latest/use/suppressions): `eslint --suppress-all` records today's violations in `eslint-suppressions.json`, new code is held to the rules, and `eslint --prune-suppressions` removes entries as files get fixed. With ESLint 10 the `lint` hook reads the same file, so an agent editing an old file is only told about what it broke, and the `protect` hook stops it from adding to the file.
+
+## Oxlint
+
+Oxlint is much faster, but it cannot hold the line on its own. It has no `noInlineConfig`: `respectEslintDisableDirectives: false` makes `eslint-disable` comments do nothing, yet `// oxlint-disable` still works and no option turns it off ([oxc#15173](https://github.com/oxc-project/oxc/issues/15173)). The `lint` hook runs ESLint, because Oxlint has no Node API yet.
+
+So run Oxlint for its own rules and keep ESLint with this plugin as the gate in CI. [`eslint-plugin-oxlint`](https://github.com/oxc-project/eslint-plugin-oxlint) turns off the ESLint rules Oxlint already runs and leaves `agent-guard/*` on.
+
+To see the rules in Oxlint's output as well, load the package as a [JS plugin](https://oxc.rs/docs/guide/usage/linter/js-plugins.html). JS plugins are alpha; this was checked with oxlint 1.94. `eslint` must be installed, because the four core rules come from it, and the presets are written by hand, since Oxlint does not read flat configs:
+
+```json
+{
+  "jsPlugins": ["eslint-plugin-agent-guard"],
+  "options": { "respectEslintDisableDirectives": false, "reportUnusedDisableDirectives": "error" },
+  "rules": {
+    "agent-guard/max-lines": ["error", { "max": 250, "skipBlankLines": true, "skipComments": true, "hint": "Split the file by responsibility into separate modules." }],
+    "agent-guard/max-lines-per-function": ["error", { "max": 50, "skipBlankLines": true, "skipComments": true, "hint": "Extract the steps into small, well-named functions." }],
+    "agent-guard/max-params": ["error", { "max": 2, "hint": "Pass one typed object and destructure it." }],
+    "agent-guard/no-magic-numbers": ["error", {
+      "ignore": [-1, 0, 1, 2], "ignoreArrayIndexes": true, "ignoreDefaultValues": true, "enforceConst": true,
+      "ignoreEnums": true, "ignoreNumericLiteralTypes": true, "ignoreReadonlyClassProperties": true, "ignoreTypeIndexes": true,
+      "hint": "Move it to a named constant, for example REQUEST_TIMEOUT_MS, at the top of the module or in a *.constants file."
+    }],
+    "agent-guard/no-self-named-constant": "error",
+    "agent-guard/no-body-comments": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{spec,test}.{js,jsx,ts,tsx}", "**/{test,tests,__tests__,e2e}/**"],
+      "rules": { "agent-guard/max-lines": "off", "agent-guard/max-lines-per-function": "off", "agent-guard/no-magic-numbers": "off" }
+    }
+  ]
+}
+```
+
+`protect` guards `.oxlintrc.json` and `oxlint.config.*` like the ESLint config.
 
 ## Development
 
