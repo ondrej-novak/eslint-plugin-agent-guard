@@ -6,9 +6,9 @@
 
 ESLint rules and Claude Code hooks that keep AI-written code small, named and readable.
 
-AI coding agents write code that works. Left alone, they also write 180-line functions, `setTimeout(run, 10000)` with no hint of what 10000 is, six positional parameters, and `// download the file` above the line that downloads the file. Instructions in `CLAUDE.md` help, but the agent can ignore them. It cannot ignore a lint error that fails the build.
+Instructions in `CLAUDE.md` are suggestions. An agent can drop them halfway through a long session. A lint error that fails the build is not a suggestion.
 
-The five limits come from Alex Brohshtut's [ESLint as AI Guardrails](https://medium.com/@albro/eslint-as-ai-guardrails-the-rules-that-make-ai-code-readable-8899c71d3446): no comments, two parameters, 50 lines per function, 250 lines per file, no magic numbers. This package ships them as one preset and adds three things:
+Alex Brohshtut made this case in [ESLint as AI Guardrails](https://medium.com/@albro/eslint-as-ai-guardrails-the-rules-that-make-ai-code-readable-8899c71d3446) with five hard limits: no comments, two parameters, 50 lines per function, 250 lines per file, no magic numbers. The limits in this package are his. It ships them as one preset and adds three things:
 
 - **Messages that say where the fix goes.** "Maximum allowed is 2" says what is wrong. "Pass one typed object and destructure it" is what the agent acts on.
 - **Closing the obvious escapes.** Disable comments have no effect, `const TEN_THOUSAND = 10000` is rejected, and the hooks stop the agent from editing the lint setup.
@@ -85,7 +85,7 @@ Rejects comments inside function bodies. Comments elsewhere, including JSDoc on 
 ```ts
 /** Retries once, because the storage API drops the first request after a cold start. */ // ✓
 export async function download(url: string) {
-  // download the file                                                                   // ✗
+  // fetch the url                                                                       // ✗
   const response = await fetch(url);
   // eslint-disable-next-line agent-guard/no-magic-numbers                              // ✗
   return response;
