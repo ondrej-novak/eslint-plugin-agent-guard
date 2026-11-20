@@ -1,7 +1,7 @@
 {
   "name": "eslint-plugin-agent-guard",
   "version": "0.1.1",
-  "description": "ESLint rules, presets and Claude Code hooks that keep AI-written code small, named and readable.",
+  "description": "ESLint rules, presets and agent hooks for Claude Code, Cursor and Codex that keep AI-written code small, named and readable.",
   "homepage": "https://github.com/ondrej-novak/eslint-plugin-agent-guard#readme",
   "bugs": "https://github.com/ondrej-novak/eslint-plugin-agent-guard/issues",
   "type": "module",
@@ -34,6 +34,8 @@
     "ai",
     "agents",
     "claude-code",
+    "cursor",
+    "codex",
     "guardrails",
     "lint",
     "code-quality"

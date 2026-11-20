@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +27,7 @@ const BOM = String.fromCharCode(0xfeff);
 
 const edit = (filePath, input = {}) => ({ cwd, tool_name: 'Edit', tool_input: { file_path: filePath, old_string: 'a', new_string: 'b', ...input } });
 const bash = (command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
+const codexPatch = (body) => ({ cwd, turn_id: 'turn-1', tool_name: 'apply_patch', tool_input: { command: `*** Begin Patch\n${body}\n*** End Patch\n` } });
 
 /** Claude Code sets this when it runs the suite, and it would move the settings file away from the fixture. */
 beforeEach(() => vi.stubEnv('CLAUDE_PROJECT_DIR', ''));
@@ -290,6 +291,31 @@ describe('protect', () => {
     });
   });
 
+  describe('on a Codex patch', () => {
+    const packageLine = readFileSync(path.join(cwd, 'package.json'), 'utf8').trim();
+    const packageChange = (from, to) => `*** Update File: package.json\n@@\n-${packageLine}\n+${packageLine.replace(from, to)}`;
+
+    it.each([
+      ['an update to eslint.config.js', '*** Update File: eslint.config.js\n@@\n-export default [];\n+export default [{}];'],
+      ['a new .codex/config.toml', '*** Add File: .codex/config.toml\n+[features]\n+hooks = false'],
+      ['a deleted eslint.config.mjs', '*** Delete File: eslint.config.mjs'],
+      ['a file moved onto eslint.config.js', '*** Update File: src/a.js\n*** Move to: eslint.config.js\n@@\n-a\n+b'],
+      ['a changed lint script', packageChange('"eslint ."', '"echo ok"')],
+      ['a source file and a lint config', '*** Update File: src/a.ts\n@@\n-a\n+b\n*** Delete File: .eslintrc.json'],
+    ])('blocks %s', (_, body) => expect(protectReason(codexPatch(body))).toMatch(/not allowed/));
+
+    it.each([
+      ['an update to a source file', '*** Update File: src/a.ts\n@@ export function a() {\n-  return 1;\n+  return 2;\n*** End of File'],
+      ['a changed build script', packageChange('"tsc"', '"tsc -b"')],
+    ])('allows %s', (_, body) => expect(protectReason(codexPatch(body))).toBeUndefined());
+
+    it('reads a patch with Windows line endings', () => {
+      const crlf = (event) => ({ ...event, tool_input: { command: event.tool_input.command.replaceAll('\n', '\r\n') } });
+      expect(protectReason(crlf(codexPatch('*** Delete File: eslint.config.js')))).toMatch(/not allowed/);
+      expect(protectReason(crlf(codexPatch(packageChange('"tsc"', '"tsc -b"'))))).toBeUndefined();
+    });
+  });
+
   describe('when it cannot check a tool call', () => {
     const settingsFile = path.join(cwd, '.agent-guard.json');
     const runCli = (hook, input) => JSON.parse(execFileSync('node', [bin, hook], { input, encoding: 'utf8' }));
@@ -407,6 +433,26 @@ describe('lint feedback', () => {
   it('lints stylesheets with the project stylelint', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     const result = await lintFeedbackHook(write('a.css', '.a { color: #ggg; }\n'));
     expect(result.reason).toMatch(/color-no-invalid-hex/);
+  });
+
+  it('lints every file a Codex patch adds, changes or moves, and skips the ones it deletes', async () => {
+    write('codex-bad.js', 'export const wait = (run) => setTimeout(run, 10000);\n');
+    write('codex-moved.js', 'export const ok = 1;\n');
+    const body = [
+      '*** Add File: src/codex-bad.js',
+      '+export const wait = (run) => setTimeout(run, 10000);',
+      '*** Update File: src/codex-old-name.js',
+      '*** Move to: src/codex-moved.js',
+      '@@',
+      '-export const ok = 0;',
+      '+export const ok = 1;',
+      '*** Delete File: src/codex-gone.js',
+    ].join('\n');
+    const result = await lintFeedbackHook({ ...codexPatch(body), session_id: randomUUID() });
+    expect(result.decision).toBe('block');
+    expect(result.reason).toMatch(/src\/codex-bad\.js \(attempt 1 of 3\)[\s\S]*No magic number: 10000/);
+    expect(result.reason).not.toMatch(/codex-moved|codex-gone/);
+    expect(result.systemMessage).toBeUndefined();
   });
 });
 

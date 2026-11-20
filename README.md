@@ -4,7 +4,7 @@
 [![CI](https://github.com/ondrej-novak/eslint-plugin-agent-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/ondrej-novak/eslint-plugin-agent-guard/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/eslint-plugin-agent-guard)](LICENSE)
 
-ESLint rules and Claude Code hooks that keep AI-written code small, named and readable.
+ESLint rules and agent hooks for Claude Code, Cursor and Codex that keep AI-written code small, named and readable.
 
 AI coding agents write code that works. Left alone, they also write 180-line functions, `setTimeout(run, 10000)` with no hint of what 10000 is, six positional parameters, and `// download the file` above the line that downloads the file. Instructions in `CLAUDE.md` help, but the agent can ignore them. It cannot ignore a lint error that fails the build.
 
@@ -22,7 +22,7 @@ It is the TypeScript sibling of [stylelint-plugin-design-system-guard](https://g
 npm install --save-dev eslint eslint-plugin-agent-guard
 ```
 
-Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [Claude Code hooks](#claude-code-hooks), and ships type declarations, so an `eslint.config.ts` type-checks.
+Needs Node 22.13+ or 24+ and ESLint 9.39+ or 10. The package also installs the `agent-guard` CLI for the [agent hooks](#agent-hooks), and ships type declarations, so an `eslint.config.ts` type-checks.
 
 ```js
 // eslint.config.js
@@ -150,9 +150,9 @@ export default [
 
 In an `eslint.config.ts`, take the rule from `@typescript-eslint/eslint-plugin` instead: `tseslint.plugin` is typed without its rules.
 
-## Claude Code hooks
+## Agent hooks
 
-The package ships a small CLI for two [Claude Code hooks](https://docs.claude.com/en/docs/claude-code/hooks). Copy [`examples/.claude/settings.json`](examples/.claude/settings.json) into your project:
+The package ships a small CLI for two hooks, `protect` and `lint`. They run in Claude Code, in Cursor, which loads the same file, and in [Codex](#codex). For [Claude Code](https://docs.claude.com/en/docs/claude-code/hooks), copy [`examples/.claude/settings.json`](examples/.claude/settings.json) into your project:
 
 ```json
 {
@@ -188,11 +188,36 @@ The file is read from `$CLAUDE_PROJECT_DIR`, so a `cd` during the session does n
 
 If `.agent-guard.json` is invalid, or a hook fails for any other reason, `protect` blocks the tool call and says why. With an invalid file, `lint` still hands lint errors to the agent, using the default limit, and tells you once; if it fails for another reason, it tells you the edit went unlinted. Claude Code lets a tool call through when its hook crashes, so a guard that crashed silently would be off. Where the CLI itself cannot answer, for example with a mistyped hook name, it exits with code 2, which Claude Code treats as a block.
 
-Cursor loads the same hooks from `.claude/settings.json` while Settings → Agents → Third-Party Imports is on, which is the default. It renames Bash to `Shell` and has its own `Delete` tool, hence the two extra names in the matcher. Cursor does not say which shell runs a command, so `protect` reads a `Shell` command both as Bash and as PowerShell and blocks it if either reading would change the lint setup. Cursor shows the reason for a block to you, not to the agent, and does not hand the `lint` hook's errors back to the agent.
-
 A matching instruction for the agent is in [`examples/.claude/rules/code-shape.md`](examples/.claude/rules/code-shape.md). The rules hold either way; the instruction saves the agent a few failed attempts.
 
 The hooks block the easy paths, not every path. Lint in CI is the real gate: run `eslint .` there and block the merge on errors.
+
+### Cursor
+
+Cursor loads the same hooks from `.claude/settings.json` while Settings → Agents → Third-Party Imports is on, which is the default. It renames Bash to `Shell` and has its own `Delete` tool, hence the two extra names in the matcher. Cursor does not say which shell runs a command, so `protect` reads a `Shell` command both as Bash and as PowerShell and blocks it if either reading would change the lint setup. Cursor shows the reason for a block to you, not to the agent, and does not hand the `lint` hook's errors back to the agent.
+
+### Codex
+
+Codex reads hooks in the same format from `.codex/hooks.json`. Its file edits arrive as one `apply_patch` call:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|apply_patch",
+        "hooks": [{ "type": "command", "command": "node \"$(git rev-parse --show-toplevel)/node_modules/eslint-plugin-agent-guard/bin/agent-guard.mjs\" protect" }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "apply_patch",
+        "hooks": [{ "type": "command", "command": "node \"$(git rev-parse --show-toplevel)/node_modules/eslint-plugin-agent-guard/bin/agent-guard.mjs\" lint" }] }
+    ]
+  }
+}
+```
+
+Codex sets no variable for the project folder and can start in a subfolder, so the path starts at the git root. `protect` judges every file in a patch, both names of a moved file included, and `lint` lints every file the patch leaves behind. Codex does not say which shell runs a command either, so commands are read both as Bash and as PowerShell. `.agent-guard.json` is read from the folder Codex started in.
+
+Codex runs a new or changed hook only after you trust it in `/hooks`. On Windows, [openai/codex#27833](https://github.com/openai/codex/issues/27833) reports that a denied `apply_patch` is written anyway, so there CI is the only gate.
 
 ## Existing codebases
 

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { isCodex } from './agents.js';
 import { skipsChecks } from './git-hooks.js';
+import { patchToolCalls } from './patch.js';
 import { isProtected, loadSettings, parseJson, projectRoot, readText, toProjectPath } from './settings.js';
 import { DIALECTS, isTextCommand, parseShell } from './shell.js';
 import { commandWrites, writesProtectedFile } from './shell-writes.js';
@@ -106,11 +107,16 @@ function checkCommand(tool) {
   return dialectsOf(tool).map((dialect) => commandReason(command, dialect)).find(Boolean);
 }
 
+function checkPatch(tool, context) {
+  return patchToolCalls(tool.tool_input?.command ?? '').map((call) => checkFileTool({ ...tool, ...call }, context)).find(Boolean);
+}
+
 /** Returns why a tool call must not run, or undefined when it may. */
 export function protectReason(tool) {
   const cwd = tool.cwd ?? process.cwd();
   const root = projectRoot(tool);
   const settings = loadSettings(root);
+  if (tool.tool_name === 'apply_patch') return checkPatch(tool, { cwd, root, settings });
   if (FILE_TOOLS.has(tool.tool_name)) return checkFileTool(tool, { cwd, root, settings });
   if (SHELL_TOOLS.has(tool.tool_name)) return checkCommand(tool);
   return undefined;
