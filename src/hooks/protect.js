@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { isCodex } from './agents.js';
+import { isCodex, withCursorFields } from './agents.js';
 import { skipsChecks } from './git-hooks.js';
 import { patchToolCalls } from './patch.js';
 import { isProtected, loadSettings, parseJson, projectRoot, readText, toProjectPath } from './settings.js';
@@ -128,7 +128,7 @@ function deny(reason) {
 
 export function protectHook(tool) {
   const reason = protectReason(tool);
-  return reason ? deny(`${reason} ${REASON_SUFFIX}`) : undefined;
+  return reason ? withCursorFields(tool, deny(`${reason} ${REASON_SUFFIX}`)) : undefined;
 }
 
 /** Claude Code lets a tool call through when its hook exits with an error, so a crash has to deny. */

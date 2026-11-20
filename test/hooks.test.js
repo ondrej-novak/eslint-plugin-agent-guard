@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lintFeedbackHook } from '../src/hooks/lint-feedback.js';
-import { protectReason } from '../src/hooks/protect.js';
+import { protectHook, protectReason } from '../src/hooks/protect.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(here, 'fixtures/project');
@@ -290,6 +290,13 @@ describe('protect', () => {
     it('blocks Cursor deleting a lint config', () => {
       expect(protectReason({ cwd, tool_name: 'Delete', tool_input: { file_path: 'eslint.config.js' } })).toMatch(/not allowed/);
     });
+
+    it('gives Cursor the reason for a block in the field its agent reads', () => {
+      const output = protectHook({ ...edit('eslint.config.js'), tool_name: 'Write', cursor_version: '2.4.0' });
+      expect(output.hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(output).toMatchObject({ permission: 'deny', agent_message: output.hookSpecificOutput.permissionDecisionReason });
+      expect(protectHook(edit('eslint.config.js'))).not.toHaveProperty('agent_message');
+    });
   });
 
   describe('on a Codex patch', () => {
@@ -434,6 +441,18 @@ describe('lint feedback', () => {
   it('lints stylesheets with the project stylelint', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     const result = await lintFeedbackHook(write('a.css', '.a { color: #ggg; }\n'));
     expect(result.reason).toMatch(/color-no-invalid-hex/);
+  });
+
+  it('hands lint errors to Cursor as additional context, counting failures per Cursor conversation', async () => {
+    const event = write('cursor.js', 'export const wait = (run) => setTimeout(run, 10000);\n');
+    delete event.session_id;
+    const inConversation = (id) => ({ ...event, cursor_version: '2.4.0', conversation_id: id });
+    const [first, other] = [randomUUID(), randomUUID()];
+    await lintFeedbackHook(inConversation(first));
+    const second = await lintFeedbackHook(inConversation(first));
+    expect(second.additional_context).toBe(second.reason);
+    expect(second.reason).toMatch(/attempt 2 of 3/);
+    expect((await lintFeedbackHook(inConversation(other))).reason).toMatch(/attempt 1 of 3/);
   });
 
   it('lints every file a Codex patch adds, changes or moves, and skips the ones it deletes', async () => {

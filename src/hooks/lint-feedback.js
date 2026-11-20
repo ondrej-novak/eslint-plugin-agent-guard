@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { sessionOf, withCursorFields } from './agents.js';
 import { patchedFiles } from './patch.js';
 import { DEFAULT_MAX_ATTEMPTS, loadSettings, projectRoot, readText, toProjectPath } from './settings.js';
 import { REASON_SUFFIX } from './protect.js';
@@ -134,7 +135,7 @@ function combine(answers) {
 export async function lintFeedbackHook(tool) {
   const answers = [];
   for (const filePath of editedFiles(tool)) answers.push(await lintEditedFile(tool, filePath));
-  return combine(answers);
+  return withCursorFields(tool, combine(answers));
 }
 
 async function lintEditedFile(tool, filePath) {
@@ -143,7 +144,7 @@ async function lintEditedFile(tool, filePath) {
   const linter = LINTERS.find(({ files }) => files.test(absolute));
   if (!linter) return undefined;
   const projectPath = toProjectPath(absolute, cwd);
-  const sessionId = tool.session_id;
+  const sessionId = sessionOf(tool);
   const found = await findLinter(linter.specifier, { cwd, file: absolute });
   if (!found) {
     if (linter.optional) return undefined;

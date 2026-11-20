@@ -206,7 +206,7 @@ The hooks block the easy paths, not every path. Lint in CI is the real gate: run
 
 ### Cursor
 
-Cursor loads the same hooks from `.claude/settings.json` while Settings → Agents → Third-Party Imports is on, which is the default. It renames Bash to `Shell` and has its own `Delete` tool, hence the two extra names in the matcher. Cursor does not say which shell runs a command, so `protect` reads a `Shell` command both as Bash and as PowerShell and blocks it if either reading would change the lint setup. Cursor shows the reason for a block to you, not to the agent, and does not hand the `lint` hook's errors back to the agent.
+Cursor loads the same hooks from `.claude/settings.json` while Settings → Agents → Third-Party Imports is on, which is the default. It renames Bash to `Shell` and has its own `Delete` tool, hence the two extra names in the matcher. Cursor does not say which shell runs a command, so `protect` reads a `Shell` command both as Bash and as PowerShell and blocks it if either reading would change the lint setup. Cursor shows a Claude Code block reason to you only and has no mapping for a PostToolUse block, so when an event comes from Cursor the hooks add Cursor's own fields: the reason for a block as `agent_message`, lint errors as `additional_context`. Lint failures are counted per Cursor conversation. These fields follow Cursor's documentation and have not yet been tried in Cursor itself.
 
 ### Codex
 
