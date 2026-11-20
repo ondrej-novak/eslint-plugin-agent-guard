@@ -32,7 +32,13 @@ const PROTECTED_NAMES = [
   /^\.agent-guard\.json$/i,
 ];
 
-const PROTECTED_PATHS = [/(^|\/)\.claude\/settings(\.local)?\.json$/i, /(^|\/)\.husky\//i];
+/** Cursor ranks `.cursor/hooks.json` above Claude hooks when answers conflict, and `.codex/config.toml` can turn hooks off. */
+const PROTECTED_PATHS = [
+  /(^|\/)\.claude\/settings(\.local)?\.json$/i,
+  /(^|\/)\.husky\//i,
+  /(^|\/)\.cursor\/hooks\.json$/i,
+  /(^|\/)\.codex\/(?:hooks\.json|config\.toml)$/i,
+];
 
 /** Only a missing file means "no settings"; any other read error must reach the fail-closed handler. */
 function settingsText(file) {
@@ -106,7 +112,7 @@ export function isProtected(projectPath, settings) {
 
 /**
  * The same names, as text to look for in one word of a shell command, plus what removes them wholesale:
- * the `.husky` and `.claude` folders, and this package, without which the hooks stop running at all.
+ * the `.husky`, `.claude`, `.cursor` and `.codex` folders, and this package, without which the hooks stop running at all.
  */
 export const PROTECTED_IN_COMMAND =
-  /eslint\.config\.|\.eslintrc|\.eslintignore|eslint-suppressions\.json|stylelint\.config\.|\.stylelintrc|\.stylelintignore|\.agent-guard\.json|\.claude(?:\/settings|\/?(?![\w./-]))|\.husky(?![\w.-])|node_modules\/eslint-plugin-agent-guard(?![\w.-])/i;
+  /eslint\.config\.|\.eslintrc|\.eslintignore|eslint-suppressions\.json|stylelint\.config\.|\.stylelintrc|\.stylelintignore|\.agent-guard\.json|\.claude(?:\/settings|\/?(?![\w./-]))|\.cursor(?:\/hooks\.json|\/?(?![\w./-]))|\.codex(?:\/hooks\.json|\/config\.toml|\/?(?![\w./-]))|\.husky(?![\w.-])|node_modules\/eslint-plugin-agent-guard(?![\w.-])/i;

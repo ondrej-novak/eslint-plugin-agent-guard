@@ -1,11 +1,13 @@
 import path from 'node:path';
+import { isCodex } from './agents.js';
 import { skipsChecks } from './git-hooks.js';
 import { isProtected, loadSettings, parseJson, projectRoot, readText, toProjectPath } from './settings.js';
 import { DIALECTS, isTextCommand, parseShell } from './shell.js';
 import { commandWrites, writesProtectedFile } from './shell-writes.js';
 
-const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** `Delete` and `Shell` are Cursor's names; it renames Claude Code's Edit to Write and Bash to Shell. */
+const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Delete']);
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'Shell']);
 const LINT_KEY = /lint/i;
 
 const PACKAGE_JSON = /(?<![\w.-])package\.json(?![\w.-])/i;
@@ -80,17 +82,28 @@ function writesPackageJson({ commands, targets }) {
   return targets.some(namesPackageJson) || (commands.flat().some(namesPackageJson) && commands.some(commandWrites));
 }
 
-function checkCommand({ tool_name: toolName, tool_input: input }) {
-  const command = input?.command ?? '';
-  const pipelines = parseShell(command, DIALECTS[toolName]);
+/** Cursor's Shell and Codex's Bash run the user's shell, which on Windows can be PowerShell, so both readings must pass. */
+function dialectsOf(tool) {
+  if (tool.tool_name === 'PowerShell') return [DIALECTS.PowerShell];
+  if (tool.tool_name === 'Bash' && !isCodex(tool)) return [DIALECTS.Bash];
+  return [DIALECTS.Bash, DIALECTS.PowerShell];
+}
+
+function commandReason(command, dialect) {
+  const pipelines = parseShell(command, dialect);
   const commands = pipelines.flatMap((pipeline) => pipeline.commands);
   if (commands.some(skipsChecks)) return 'Skipping hooks or lint configuration on the command line is not allowed.';
-  if (writesProtectedFile(command, DIALECTS[toolName])) return 'This command would change a lint guardrail file, which is not allowed.';
+  if (writesProtectedFile(command, dialect)) return 'This command would change a lint guardrail file, which is not allowed.';
   if (commands.some((words) => !isTextCommand(words) && NPM_PKG_LINT_CHANGE.test(words.join(' ')))) return 'Changing lint scripts or lint configuration in package.json is not allowed.';
   if (pipelines.some(writesPackageJson)) {
     return 'Changing package.json from the shell is not allowed, because the result cannot be checked for lint changes. Use the Edit tool: edits that leave the lint setup alone go through.';
   }
   return undefined;
+}
+
+function checkCommand(tool) {
+  const command = tool.tool_input?.command ?? '';
+  return dialectsOf(tool).map((dialect) => commandReason(command, dialect)).find(Boolean);
 }
 
 /** Returns why a tool call must not run, or undefined when it may. */

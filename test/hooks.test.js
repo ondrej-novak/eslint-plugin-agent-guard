@@ -72,7 +72,7 @@ describe('the CLI', () => {
 });
 
 describe('protect', () => {
-  it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json'])(
+  it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json', '.cursor/hooks.json', '.codex/hooks.json', '.codex/config.toml'])(
     'blocks edits to %s',
     (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
   );
@@ -162,6 +162,9 @@ describe('protect', () => {
     'rm -rf .claude',
     'mv .claude/ .claude-off',
     'rm -rf node_modules/eslint-plugin-agent-guard',
+    'rm -rf .codex',
+    'rm .cursor/hooks.json',
+    "echo '[features]' >> .codex/config.toml",
     'npm pkg set scripts.lint="exit 0"',
     'npm pkg delete scripts.lint',
     'npm --prefix mobile pkg set scripts.lint="exit 0"',
@@ -220,6 +223,7 @@ describe('protect', () => {
     'git commit -m wip # -n',
     'grep -rn -- --no-verify README.md',
     'rm -rf .claude/worktrees/old',
+    'rm -rf .cursor/rules/old',
     'ls .husky',
     'cat package.json',
     'cat package.json > /tmp/copy.json',
@@ -268,6 +272,22 @@ describe('protect', () => {
       'Get-Content package.json',
       "git commit -m @'\nit's about --no-verify; and -n\n'@",
     ])('allows the command %s', (command) => expect(protectReason(powershell(command))).toBeUndefined());
+  });
+
+  describe('in agents that do not say which shell runs the command', () => {
+    it.each([
+      ['Cursor', { tool_name: 'Shell' }],
+      ['Codex', { tool_name: 'Bash', turn_id: 'turn-1' }],
+    ])('reads a %s command both as Bash and as PowerShell', (_, event) => {
+      const judge = (command) => protectReason({ cwd, ...event, tool_input: { command } });
+      expect(judge('git commit -m wip \\\n  -n')).toMatch(/not allowed/);
+      expect(judge('git commit -m wip `\n  -n')).toMatch(/not allowed/);
+      expect(judge('npm test')).toBeUndefined();
+    });
+
+    it('blocks Cursor deleting a lint config', () => {
+      expect(protectReason({ cwd, tool_name: 'Delete', tool_input: { file_path: 'eslint.config.js' } })).toMatch(/not allowed/);
+    });
   });
 
   describe('when it cannot check a tool call', () => {
