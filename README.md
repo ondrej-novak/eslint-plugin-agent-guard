@@ -21,6 +21,16 @@ It is the TypeScript sibling of [stylelint-plugin-design-system-guard](https://g
 ## Install
 
 ```sh
+npx eslint-plugin-agent-guard init
+```
+
+Run it in the folder with your `package.json`. It installs `eslint` and this package with the package manager your lockfile shows, creates an `eslint.config.js` with the preset that fits your dependencies when there is no ESLint config yet, adds the [agent hooks](#agent-hooks) to `.claude/settings.json` in the repository root, and copies an instruction for the agent to `.claude/rules/code-shape.md`. Add `--codex` to set up [Codex](#codex) too; it is added anyway when a `.codex` folder exists. `--skip-install` leaves the dependencies to you. It never overwrites a file: an existing config is left alone with a note on what to add, and existing hooks are kept.
+
+Use the full package name. `agent-guard` is the CLI's name once the package is installed, but on npm it belongs to an unrelated package, so `npx agent-guard` in a project without this package downloads and runs that one.
+
+To set it up by hand:
+
+```sh
 npm install --save-dev eslint eslint-plugin-agent-guard
 ```
 
@@ -154,7 +164,7 @@ In an `eslint.config.ts`, take the rule from `@typescript-eslint/eslint-plugin` 
 
 ## Agent hooks
 
-The package ships a small CLI for two hooks, `protect` and `lint`. They run in Claude Code, in Cursor, which loads the same file, and in [Codex](#codex). For [Claude Code](https://docs.claude.com/en/docs/claude-code/hooks), copy [`examples/.claude/settings.json`](examples/.claude/settings.json) into your project:
+The package ships a small CLI for two hooks, `protect` and `lint`. They run in Claude Code, in Cursor, which loads the same file, and in [Codex](#codex). `init` sets them up; by hand, for [Claude Code](https://docs.claude.com/en/docs/claude-code/hooks), copy [`examples/.claude/settings.json`](examples/.claude/settings.json) into your project:
 
 ```json
 {
@@ -190,7 +200,7 @@ The file is read from `$CLAUDE_PROJECT_DIR`, so a `cd` during the session does n
 
 If `.agent-guard.json` is invalid, or a hook fails for any other reason, `protect` blocks the tool call and says why. With an invalid file, `lint` still hands lint errors to the agent, using the default limit, and tells you once; if it fails for another reason, it tells you the edit went unlinted. Claude Code lets a tool call through when its hook crashes, so a guard that crashed silently would be off. Where the CLI itself cannot answer, for example with a mistyped hook name, it exits with code 2, which Claude Code treats as a block.
 
-A matching instruction for the agent is in [`examples/.claude/rules/code-shape.md`](examples/.claude/rules/code-shape.md). The rules hold either way; the instruction saves the agent a few failed attempts.
+A matching instruction for the agent is in [`src/init/code-shape.md`](src/init/code-shape.md), which `init` copies to `.claude/rules/`. Codex reads `AGENTS.md` instead, so point it there. The rules hold either way; the instruction saves the agent a few failed attempts.
 
 The hooks block the easy paths, not every path. Lint in CI is the real gate: run `eslint .` there and block the merge on errors.
 

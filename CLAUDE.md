@@ -1,6 +1,6 @@
 # eslint-plugin-agent-guard
 
-ESLint rules, flat config presets and Claude Code hooks that keep AI-written code small, named and readable.
+ESLint rules, flat config presets and agent hooks (Claude Code, Cursor, Codex) that keep AI-written code small, named and readable.
 Sister project of [stylelint-plugin-design-system-guard](https://github.com/ondrej-novak/stylelint-plugin-design-system-guard): same ideas, same tone.
 
 ## Layout
@@ -9,7 +9,8 @@ Sister project of [stylelint-plugin-design-system-guard](https://github.com/ondr
 - `src/rules/core.js` wraps the four core rules the presets use: `max-lines`, `max-lines-per-function`, `max-params`, `no-magic-numbers`.
 - `src/rules/no-self-named-constant.js` and `src/rules/no-body-comments.js` are the two rules of our own.
 - `src/configs.js` builds the `recommended`, `react` and `angular` presets.
-- `src/hooks/` holds the Claude Code hooks, run through `bin/agent-guard.mjs protect|lint`.
+- `src/hooks/` holds the agent hooks, run through `bin/agent-guard.mjs protect|lint`. Cursor loads them from `.claude/settings.json` with its own tool names; `patch.js` turns a Codex `apply_patch` into the Write and MultiEdit calls it stands for, so both are judged like Claude Code edits.
+- `src/init/` is `agent-guard init`: installs what is missing, writes an ESLint config where there is none, merges the hooks into `.claude/settings.json` and `.codex/hooks.json`, and copies `code-shape.md`. It never overwrites a file.
 - `types/index.d.ts` is the hand-written type declaration for the package. `test/types/usage.ts` uses it the way a typed `eslint.config.ts` would.
 - `test/` uses vitest and ESLint's `RuleTester`. `test/fixtures/project` is a tiny project the hook tests lint.
 

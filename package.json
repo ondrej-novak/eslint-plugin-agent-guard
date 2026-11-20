@@ -15,7 +15,8 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "agent-guard": "bin/agent-guard.mjs"
+    "agent-guard": "bin/agent-guard.mjs",
+    "eslint-plugin-agent-guard": "bin/agent-guard.mjs"
   },
   "files": [
     "src",
