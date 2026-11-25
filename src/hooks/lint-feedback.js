@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { sessionOf, withCursorFields } from './agents.js';
+import { patchedFiles } from './patch.js';
 import { DEFAULT_MAX_ATTEMPTS, loadSettings, projectRoot, readText, toProjectPath } from './settings.js';
 import { REASON_SUFFIX } from './protect.js';
 
@@ -111,17 +113,38 @@ export function lintFailure(error) {
   return { systemMessage: `agent-guard: the lint hook failed (${error.message}), so this edit was not linted.` };
 }
 
-/** Lints the file a tool just wrote and hands any errors back to the agent. */
+function editedFiles(tool) {
+  const input = tool.tool_input ?? {};
+  if (tool.tool_name === 'apply_patch') return patchedFiles(input.command ?? '');
+  return FILE_TOOLS.has(tool.tool_name) && input.file_path ? [input.file_path] : [];
+}
+
+/** One patch can change several files: the agent gets every failure in one answer, the user every notice. */
+function combine(answers) {
+  const found = answers.filter(Boolean);
+  if (found.length === 0) return undefined;
+  const reasons = found.map(({ reason }) => reason).filter(Boolean);
+  const notices = found.map(({ systemMessage }) => systemMessage).filter(Boolean);
+  return {
+    ...(reasons.length > 0 && { decision: 'block', reason: reasons.join('\n\n') }),
+    ...(notices.length > 0 && { systemMessage: notices.join('\n') }),
+  };
+}
+
+/** Lints the files a tool just wrote and hands any errors back to the agent. */
 export async function lintFeedbackHook(tool) {
-  if (!FILE_TOOLS.has(tool.tool_name)) return undefined;
-  const filePath = tool.tool_input?.file_path;
-  if (!filePath) return undefined;
+  const answers = [];
+  for (const filePath of editedFiles(tool)) answers.push(await lintEditedFile(tool, filePath));
+  return withCursorFields(tool, combine(answers));
+}
+
+async function lintEditedFile(tool, filePath) {
   const cwd = tool.cwd ?? process.cwd();
   const absolute = path.resolve(cwd, filePath);
   const linter = LINTERS.find(({ files }) => files.test(absolute));
   if (!linter) return undefined;
   const projectPath = toProjectPath(absolute, cwd);
-  const sessionId = tool.session_id;
+  const sessionId = sessionOf(tool);
   const found = await findLinter(linter.specifier, { cwd, file: absolute });
   if (!found) {
     if (linter.optional) return undefined;

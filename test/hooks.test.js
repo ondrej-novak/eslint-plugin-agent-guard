@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lintFeedbackHook } from '../src/hooks/lint-feedback.js';
-import { protectReason } from '../src/hooks/protect.js';
+import { protectHook, protectReason } from '../src/hooks/protect.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(here, 'fixtures/project');
@@ -27,6 +27,7 @@ const BOM = String.fromCharCode(0xfeff);
 
 const edit = (filePath, input = {}) => ({ cwd, tool_name: 'Edit', tool_input: { file_path: filePath, old_string: 'a', new_string: 'b', ...input } });
 const bash = (command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
+const codexPatch = (body) => ({ cwd, turn_id: 'turn-1', tool_name: 'apply_patch', tool_input: { command: `*** Begin Patch\n${body}\n*** End Patch\n` } });
 
 /** Claude Code sets this when it runs the suite, and it would move the settings file away from the fixture. */
 beforeEach(() => vi.stubEnv('CLAUDE_PROJECT_DIR', ''));
@@ -72,7 +73,7 @@ describe('the CLI', () => {
 });
 
 describe('protect', () => {
-  it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json'])(
+  it.each(['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', 'stylelint.config.js', '.stylelintrc.json', 'eslint-suppressions.json', '.agent-guard.json', '.claude/settings.json', '.claude/settings.local.json', '.cursor/hooks.json', '.codex/hooks.json', '.codex/config.toml', '.oxlintrc.json', 'oxlint.config.ts'])(
     'blocks edits to %s',
     (file) => expect(protectReason(edit(path.join(cwd, file)))).toMatch(/not allowed/),
   );
@@ -162,6 +163,10 @@ describe('protect', () => {
     'rm -rf .claude',
     'mv .claude/ .claude-off',
     'rm -rf node_modules/eslint-plugin-agent-guard',
+    'rm -rf .codex',
+    'rm .cursor/hooks.json',
+    "echo '[features]' >> .codex/config.toml",
+    "echo '{}' > .oxlintrc.json",
     'npm pkg set scripts.lint="exit 0"',
     'npm pkg delete scripts.lint',
     'npm --prefix mobile pkg set scripts.lint="exit 0"',
@@ -220,6 +225,7 @@ describe('protect', () => {
     'git commit -m wip # -n',
     'grep -rn -- --no-verify README.md',
     'rm -rf .claude/worktrees/old',
+    'rm -rf .cursor/rules/old',
     'ls .husky',
     'cat package.json',
     'cat package.json > /tmp/copy.json',
@@ -268,6 +274,54 @@ describe('protect', () => {
       'Get-Content package.json',
       "git commit -m @'\nit's about --no-verify; and -n\n'@",
     ])('allows the command %s', (command) => expect(protectReason(powershell(command))).toBeUndefined());
+  });
+
+  describe('in agents that do not say which shell runs the command', () => {
+    it.each([
+      ['Cursor', { tool_name: 'Shell' }],
+      ['Codex', { tool_name: 'Bash', turn_id: 'turn-1' }],
+    ])('reads a %s command both as Bash and as PowerShell', (_, event) => {
+      const judge = (command) => protectReason({ cwd, ...event, tool_input: { command } });
+      expect(judge('git commit -m wip \\\n  -n')).toMatch(/not allowed/);
+      expect(judge('git commit -m wip `\n  -n')).toMatch(/not allowed/);
+      expect(judge('npm test')).toBeUndefined();
+    });
+
+    it('blocks Cursor deleting a lint config', () => {
+      expect(protectReason({ cwd, tool_name: 'Delete', tool_input: { file_path: 'eslint.config.js' } })).toMatch(/not allowed/);
+    });
+
+    it('gives Cursor the reason for a block in the field its agent reads', () => {
+      const output = protectHook({ ...edit('eslint.config.js'), tool_name: 'Write', cursor_version: '2.4.0' });
+      expect(output.hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(output).toMatchObject({ permission: 'deny', agent_message: output.hookSpecificOutput.permissionDecisionReason });
+      expect(protectHook(edit('eslint.config.js'))).not.toHaveProperty('agent_message');
+    });
+  });
+
+  describe('on a Codex patch', () => {
+    const packageLine = readFileSync(path.join(cwd, 'package.json'), 'utf8').trim();
+    const packageChange = (from, to) => `*** Update File: package.json\n@@\n-${packageLine}\n+${packageLine.replace(from, to)}`;
+
+    it.each([
+      ['an update to eslint.config.js', '*** Update File: eslint.config.js\n@@\n-export default [];\n+export default [{}];'],
+      ['a new .codex/config.toml', '*** Add File: .codex/config.toml\n+[features]\n+hooks = false'],
+      ['a deleted eslint.config.mjs', '*** Delete File: eslint.config.mjs'],
+      ['a file moved onto eslint.config.js', '*** Update File: src/a.js\n*** Move to: eslint.config.js\n@@\n-a\n+b'],
+      ['a changed lint script', packageChange('"eslint ."', '"echo ok"')],
+      ['a source file and a lint config', '*** Update File: src/a.ts\n@@\n-a\n+b\n*** Delete File: .eslintrc.json'],
+    ])('blocks %s', (_, body) => expect(protectReason(codexPatch(body))).toMatch(/not allowed/));
+
+    it.each([
+      ['an update to a source file', '*** Update File: src/a.ts\n@@ export function a() {\n-  return 1;\n+  return 2;\n*** End of File'],
+      ['a changed build script', packageChange('"tsc"', '"tsc -b"')],
+    ])('allows %s', (_, body) => expect(protectReason(codexPatch(body))).toBeUndefined());
+
+    it('reads a patch with Windows line endings', () => {
+      const crlf = (event) => ({ ...event, tool_input: { command: event.tool_input.command.replaceAll('\n', '\r\n') } });
+      expect(protectReason(crlf(codexPatch('*** Delete File: eslint.config.js')))).toMatch(/not allowed/);
+      expect(protectReason(crlf(codexPatch(packageChange('"tsc"', '"tsc -b"'))))).toBeUndefined();
+    });
   });
 
   describe('when it cannot check a tool call', () => {
@@ -387,6 +441,38 @@ describe('lint feedback', () => {
   it('lints stylesheets with the project stylelint', { timeout: FIRST_IMPORT_TIMEOUT_MS }, async () => {
     const result = await lintFeedbackHook(write('a.css', '.a { color: #ggg; }\n'));
     expect(result.reason).toMatch(/color-no-invalid-hex/);
+  });
+
+  it('hands lint errors to Cursor as additional context, counting failures per Cursor conversation', async () => {
+    const event = write('cursor.js', 'export const wait = (run) => setTimeout(run, 10000);\n');
+    delete event.session_id;
+    const inConversation = (id) => ({ ...event, cursor_version: '2.4.0', conversation_id: id });
+    const [first, other] = [randomUUID(), randomUUID()];
+    await lintFeedbackHook(inConversation(first));
+    const second = await lintFeedbackHook(inConversation(first));
+    expect(second.additional_context).toBe(second.reason);
+    expect(second.reason).toMatch(/attempt 2 of 3/);
+    expect((await lintFeedbackHook(inConversation(other))).reason).toMatch(/attempt 1 of 3/);
+  });
+
+  it('lints every file a Codex patch adds, changes or moves, and skips the ones it deletes', async () => {
+    write('codex-bad.js', 'export const wait = (run) => setTimeout(run, 10000);\n');
+    write('codex-moved.js', 'export const ok = 1;\n');
+    const body = [
+      '*** Add File: src/codex-bad.js',
+      '+export const wait = (run) => setTimeout(run, 10000);',
+      '*** Update File: src/codex-old-name.js',
+      '*** Move to: src/codex-moved.js',
+      '@@',
+      '-export const ok = 0;',
+      '+export const ok = 1;',
+      '*** Delete File: src/codex-gone.js',
+    ].join('\n');
+    const result = await lintFeedbackHook({ ...codexPatch(body), session_id: randomUUID() });
+    expect(result.decision).toBe('block');
+    expect(result.reason).toMatch(/src\/codex-bad\.js \(attempt 1 of 3\)[\s\S]*No magic number: 10000/);
+    expect(result.reason).not.toMatch(/codex-moved|codex-gone/);
+    expect(result.systemMessage).toBeUndefined();
   });
 });
 
